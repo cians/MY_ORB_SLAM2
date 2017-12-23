@@ -74,6 +74,17 @@ cv::Mat FrameDrawer::DrawFrame()
     if(im.channels()<3) //this should be always true
         cvtColor(im,im,CV_GRAY2BGR);
 
+    //Draw a possible plane area ;
+    // MapInPlaneNum = 0;
+    // cv::Point2f c11(190,200);
+    // cv::Point2f c12(250,200);
+    // cv::Point2f c22(480,290);
+    // cv::Point2f c21(20,290);
+
+    // cv::line(im,c11,c12,cv::Scalar(0,0,255));
+    // cv::line(im,c21,c22,cv::Scalar(0,0,255));
+    // cv::line(im,c11,c21,cv::Scalar(0,0,255));
+    // cv::line(im,c12,c22,cv::Scalar(0,0,255));
     //Draw
     if(state==Tracking::NOT_INITIALIZED) //INITIALIZING
     {
@@ -101,12 +112,29 @@ cv::Mat FrameDrawer::DrawFrame()
                 pt1.y=vCurrentKeys[i].pt.y-r;
                 pt2.x=vCurrentKeys[i].pt.x+r;
                 pt2.y=vCurrentKeys[i].pt.y+r;
-
+                
+                // 看看有多少点在地面框内
+                //看看v是否在 rec [c21-c22,dy]
+                cv::Scalar vColor(0,255,0);
+                // if(vCurrentKeys[i].pt.x > c21.x && vCurrentKeys[i].pt.y > c11.y && vCurrentKeys[i].pt.x < c22.x && vCurrentKeys[i].pt.y < c22.y)
+                // {
+                //     float xly = (c21.x-c11.x)/(c21.y-c11.y);//负数
+                //     float xry = (c22.x-c12.x)/(c22.y-c12.y);
+                //     float dxl = vCurrentKeys[i].pt.x - c11.x;
+                //     float dyl = vCurrentKeys[i].pt.y - c11.y;
+                //     float dxr = vCurrentKeys[i].pt.x - c12.x;
+                //     float dyr = vCurrentKeys[i].pt.y - c12.y;
+                //     if(dxl/dyl > xly && dxr/dyr < xry)
+                //         {
+                //             MapInPlaneNum++;
+                //             vColor = cv::Scalar(0,0,255);
+                //         }
+                // }
                 // This is a match to a MapPoint in the map
                 if(vbMap[i])
                 {
-                    cv::rectangle(im,pt1,pt2,cv::Scalar(0,255,0));
-                    cv::circle(im,vCurrentKeys[i].pt,2,cv::Scalar(0,255,0),-1);
+                    cv::rectangle(im,pt1,pt2,vColor);
+                    cv::circle(im,vCurrentKeys[i].pt,2,vColor,-1);
                     mnTracked++;
                 }
                 else // This is match to a "visual odometry" MapPoint created in the last frame
@@ -142,6 +170,7 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
         int nKFs = mpMap->KeyFramesInMap();
         int nMPs = mpMap->MapPointsInMap();
         s << "KFs: " << nKFs << ", MPs: " << nMPs << ", Matches: " << mnTracked;
+       // s << " MapInPlaneNum:"<<MapInPlaneNum;
         if(mnTrackedVO>0)
             s << ", + VO matches: " << mnTrackedVO;
     }

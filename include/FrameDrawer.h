@@ -66,6 +66,8 @@ protected:
     Map* mpMap;
 
     std::mutex mMutex;
+    //my para
+    int  MapInPlaneNum;
 };
 
 } //namespace ORB_SLAM
