@@ -24,3 +24,6 @@ lib/
 
 CameraTrajectory.txt
 .gitignore
+*.txt
+compare.py
+.vscode/settings.json

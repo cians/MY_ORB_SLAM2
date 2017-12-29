@@ -57,7 +57,7 @@ Frame::Frame(const Frame &frame)
         SetPose(frame.mTcw);
 }
 
-
+//双目图像构造Frame，以左图为基
 Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeStamp, ORBextractor* extractorLeft, ORBextractor* extractorRight, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth)
     :mpORBvocabulary(voc),mpORBextractorLeft(extractorLeft),mpORBextractorRight(extractorRight), mTimeStamp(timeStamp), mK(K.clone()),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
      mpReferenceKF(static_cast<KeyFrame*>(NULL))
@@ -75,6 +75,7 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
 
     // ORB extraction
+    // 同时对左右目提特征，特征数为N。
     thread threadLeft(&Frame::ExtractORB,this,0,imLeft);
     thread threadRight(&Frame::ExtractORB,this,1,imRight);
     threadLeft.join();
@@ -87,6 +88,8 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
 
     UndistortKeyPoints();
 
+    // 计算双目间的匹配, 匹配成功的特征点会计算其深度
+    // 深度存放在mvuRight 和 mvDepth 中
     ComputeStereoMatches();
 
     mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));    

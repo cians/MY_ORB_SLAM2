@@ -26,6 +26,8 @@
 #include<chrono>
 
 #include<opencv2/core/core.hpp>
+#include "opencv2/imgcodecs.hpp"
+#include "opencv2/highgui.hpp"
 
 #include<System.h>
 
@@ -82,7 +84,12 @@ int main(int argc, char **argv)
 #else
         std::chrono::monotonic_clock::time_point t1 = std::chrono::monotonic_clock::now();
 #endif
-
+        //对左图高斯模糊
+        // cv::GaussianBlur(imLeft, imLeft, cv::Size(3, 3), 0, 0);
+        // cv::GaussianBlur(imRight, imRight, cv::Size(1, 1), 0, 0);
+        //  cv::imshow("left",imLeft);
+        //  cv::imshow("right",imRight);
+        //  cv::waitKey();
         // Pass the images to the SLAM system
         SLAM.TrackStereo(imLeft,imRight,tframe);
 
@@ -104,7 +111,7 @@ int main(int argc, char **argv)
             T = tframe-vTimestamps[ni-1];
         //如果不需要模拟实时，注释掉以下。
         //if(ttrack<T)
-          //  usleep((T-ttrack)*1e5);
+           // usleep((T-ttrack)*1e7);
     }
 
     // Stop all threads

@@ -109,6 +109,7 @@ public:
     list<KeyFrame*> mlpReferences;
     list<double> mlFrameTimes;
     list<bool> mlbLost;
+    //list<int> mMatchesInlierList;
 
     // True if local mapping is deactivated and we are performing only localization
     bool mbOnlyTracking;

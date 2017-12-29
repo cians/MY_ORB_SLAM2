@@ -493,6 +493,7 @@ void Tracking::Track()
         mlpReferences.push_back(mpReferenceKF);
         mlFrameTimes.push_back(mCurrentFrame.mTimeStamp);
         mlbLost.push_back(mState==LOST);
+        //mMatchesInlierList.push_back(mnMatchesInliers);
     }
     else
     {

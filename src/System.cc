@@ -469,6 +469,14 @@ void System::SaveTrajectoryKITTI(const string &filename)
     }
     f.close();
     cout << endl << "trajectory saved!" << endl;
+    // //保存matchlist
+    // std::string matchList = "matchList.txt"; 
+    // f.open(matchList.c_str());
+    // for(auto m : mpTracker->mMatchesInlierList)
+    // {
+    //     f<<m<<endl;
+    // }
+    // f.close();
 }
 
 int System::GetTrackingState()
