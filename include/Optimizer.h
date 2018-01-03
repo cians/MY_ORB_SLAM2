@@ -21,6 +21,7 @@
 #ifndef OPTIMIZER_H
 #define OPTIMIZER_H
 
+#include <Eigen/Core>
 #include "Map.h"
 #include "MapPoint.h"
 #include "KeyFrame.h"
@@ -28,11 +29,158 @@
 #include "Frame.h"
 
 #include "Thirdparty/g2o/g2o/types/types_seven_dof_expmap.h"
+#include "Thirdparty/g2o/g2o/types/types_six_dof_expmap.h"
 
 namespace ORB_SLAM2
 {
 
 class LoopClosing;
+//拟合平面需要的顶点和边
+class VertexParam4Plane: public g2o::BaseVertex<4, Eigen::Vector4d>
+{
+  public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+    VertexParam4Plane(){}
+
+    virtual bool read(std::istream& /*is*/)
+    {
+      cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+      return false;
+    }
+
+    virtual bool write(std::ostream& /*os*/) const
+    {
+      cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+      return false;
+    }
+
+    virtual void setToOriginImpl()
+    {
+      cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+    }
+    //增量函数，增量为传进的参数updat
+    virtual void oplusImpl(const double *update)
+    {
+        //将C++数组转化为eigen的一个类。
+        Eigen::Vector4d::ConstMapType v(update);
+        _estimate += v;
+    }
+
+};
+
+class EdgeMapPoint4Plane : public g2o::BaseUnaryEdge<1, Eigen::Vector3d, VertexParam4Plane>
+{
+    public:
+      EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+      EdgeMapPoint4Plane(){}
+      virtual bool read(std::istream& /*is*/)
+        {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+        }
+      virtual bool write(std::ostream& /*os*/) const
+        {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+        }
+
+      void computeError()
+      {
+          const VertexParam4Plane *params = static_cast<const VertexParam4Plane*>(vertex(0));
+          const double& a = params->estimate()(0);
+          const double& b = params->estimate()(1);
+          const double& c = params->estimate()(2);
+          const double& d = params->estimate()(3);
+          double res = a*measurement()(0) + b*measurement()(1) + c*measurement()(2) + d;
+          _error(0) = res;
+      }
+
+};  
+class VertexParam1Plane: public g2o::BaseVertex<1, double>
+{
+  public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+    VertexParam1Plane(){}
+
+    virtual bool read(std::istream& /*is*/)
+    {
+      cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+      return false;
+    }
+
+    virtual bool write(std::ostream& /*os*/) const
+    {
+      cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+      return false;
+    }
+
+    virtual void setToOriginImpl()
+    {
+      cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+    }
+    //增量函数，增量为传进的参数updat
+    virtual void oplusImpl(const double *update)
+    {
+        //将C++数组转化为eigen的一个类。
+        //Eigen::Vector4d::ConstMapType v(update);
+        _estimate += *update;
+    }
+
+};
+class EdgeMapPoint1Plane : public g2o::BaseUnaryEdge<1, Eigen::Matrix<double,6,1>, VertexParam1Plane>
+{
+    public:
+      EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+      EdgeMapPoint1Plane(){}
+      virtual bool read(std::istream& /*is*/)
+        {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+        }
+      virtual bool write(std::ostream& /*os*/) const
+        {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+        }
+
+        void computeError()
+        {
+            const VertexParam1Plane *params = static_cast<const VertexParam1Plane*>(vertex(0));
+            const double& d = params->estimate();
+            const double& a = measurement()(3);
+            const double& b = measurement()(4);
+            const double& c = measurement()(5);
+            _error(0) = a*measurement()(0) + b*measurement()(1) + c*measurement()(2) + d;
+            //_error(0) = b*measurement()(1) + d;
+        }
+
+}; 
+class EdgeLinellPlane : public g2o::BaseUnaryEdge<1, Eigen::Vector3d, VertexParam4Plane>
+{
+    public:
+        EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+        EdgeLinellPlane(){}
+        virtual bool read(std::istream& /*is*/)
+        {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+        }
+        virtual bool write(std::ostream& /*os*/) const
+        {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+        }
+
+        void computeError()
+        {
+            const VertexParam4Plane *params = static_cast<const VertexParam4Plane*>(vertex(0));
+            const double& a = params->estimate()(0);
+            const double& b = params->estimate()(1);
+            const double& c = params->estimate()(2);
+            double res = a*measurement()(0) + b*measurement()(1) + c*measurement()(2);
+            _error(0) = res;
+        }
+};
 
 class Optimizer
 {
@@ -44,6 +192,7 @@ public:
                                        const unsigned long nLoopKF=0, const bool bRobust = true);
     void static LocalBundleAdjustment(KeyFrame* pKF, bool *pbStopFlag, Map *pMap);
     int static PoseOptimization(Frame* pFrame);
+    cv::Mat static GroundOpimization(Frame* pFrame,Tracking *mpTracker,cv::Mat OriParams);
 
     // if bFixScale is true, 6DoF optimization (stereo,rgbd), 7DoF otherwise (mono)
     void static OptimizeEssentialGraph(Map* pMap, KeyFrame* pLoopKF, KeyFrame* pCurKF,

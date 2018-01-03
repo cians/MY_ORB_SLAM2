@@ -44,7 +44,10 @@ public:
     void SetCurrentCameraPose(const cv::Mat &Tcw);
     void SetReferenceKeyFrame(KeyFrame *pKF);
     void GetCurrentOpenGLCameraMatrix(pangolin::OpenGlMatrix &M);
+    void DrawGroundPlane(pangolin::OpenGlMatrix &Twc);
 
+   // double mPlaneParams;
+    cv::Mat mPlaneParams;
 private:
 
     float mKeyFrameSize;

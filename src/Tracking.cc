@@ -432,7 +432,7 @@ void Tracking::Track()
                 mVelocity = cv::Mat();
 
             mpMapDrawer->SetCurrentCameraPose(mCurrentFrame.mTcw);
-
+        
             // Clean VO matches
             for(int i=0; i<mCurrentFrame.N; i++)
             {
@@ -488,6 +488,7 @@ void Tracking::Track()
     // Store frame pose information to retrieve the complete camera trajectory afterwards.
     if(!mCurrentFrame.mTcw.empty())
     {
+        mpMapDrawer->mPlaneParams = Optimizer::GroundOpimization(&mCurrentFrame,this,mpMapDrawer->mPlaneParams);
         cv::Mat Tcr = mCurrentFrame.mTcw*mCurrentFrame.mpReferenceKF->GetPoseInverse();
         mlRelativeFramePoses.push_back(Tcr);
         mlpReferences.push_back(mpReferenceKF);

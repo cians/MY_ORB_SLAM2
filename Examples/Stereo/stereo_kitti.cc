@@ -110,8 +110,8 @@ int main(int argc, char **argv)
         else if(ni>0)
             T = tframe-vTimestamps[ni-1];
         //如果不需要模拟实时，注释掉以下。
-        //if(ttrack<T)
-           // usleep((T-ttrack)*1e7);
+        if(ttrack<T)
+            usleep((T-ttrack)*3e5);
     }
 
     // Stop all threads

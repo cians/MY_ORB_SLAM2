@@ -145,6 +145,8 @@ protected:
 
      std::mutex mMutexPos;
      std::mutex mMutexFeatures;
+public:
+     bool isGround;
 };
 
 } //namespace ORB_SLAM
