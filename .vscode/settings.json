@@ -45,6 +45,17 @@
         "typeinfo": "cpp",
         "utility": "cpp",
         "newstdvector": "cpp",
-        "stdvector": "cpp"
+        "stdvector": "cpp",
+        "cholesky": "cpp",
+        "core": "cpp",
+        "geometry": "cpp",
+        "lu": "cpp",
+        "leastsquares": "cpp",
+        "qr": "cpp",
+        "svd": "cpp",
+        "sparse": "cpp",
+        "sparsecore": "cpp",
+        "iostream": "cpp",
+        "slist": "cpp"
     }
 }

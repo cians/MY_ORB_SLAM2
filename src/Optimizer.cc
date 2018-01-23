@@ -1,4 +1,4 @@
-/**
+﻿/**
 * This file is part of ORB-SLAM2.
 *
 * Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
@@ -21,6 +21,7 @@
 #include "Optimizer.h"
 
 #include "Thirdparty/g2o/g2o/core/block_solver.h"
+//#include "Thirdparty/g2o/g2o/solvers/csparse/linear_solver_csparse.h"  
 #include "Thirdparty/g2o/g2o/core/optimization_algorithm_levenberg.h"
 #include "Thirdparty/g2o/g2o/solvers/linear_solver_eigen.h"
 #include "Thirdparty/g2o/g2o/types/types_six_dof_expmap.h"
@@ -238,13 +239,20 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
 
 int Optimizer::PoseOptimization(Frame *pFrame)
 {
+    // g2o::SparseOptimizer optimizer;
+    // g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
+
+    // linearSolver = new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
+
+    // g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
+
+    // g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+    // optimizer.setAlgorithm(solver);
+    //Because my edge， the solver above can not hold it any more, we have to be create a new one.
     g2o::SparseOptimizer optimizer;
-    g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
-
-    linearSolver = new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
-
-    g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
-
+    g2o::BlockSolverX::LinearSolverType * linearSolver;
+    linearSolver = new g2o::LinearSolverDense<g2o::BlockSolverX::PoseMatrixType>();
+    g2o::BlockSolverX * solver_ptr = new g2o::BlockSolverX(linearSolver);
     g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
     optimizer.setAlgorithm(solver);
 
@@ -257,6 +265,26 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     vSE3->setFixed(false);
     optimizer.addVertex(vSE3);
 
+//create a plane params vertex, it is 4 params!! if 
+    VertexParam4Plane* vPlane = new VertexParam4Plane();
+    //strategy 1: every time we get the pose up direction and 0.88 as its init value
+    // Eigen::Vector4d _vp = Converter::toMatrix4d(pFrame->mTcw).inverse().col(1);
+    // _vp(3) = 0.88;
+    //strategy 2: use last result as its init value this time, but need init in The Constructor!
+    Eigen::Vector4d _vp = Converter::toVector4d(pFrame->mPlaneParams);
+    vPlane->setEstimate(_vp);
+    vPlane->setId(1);
+    optimizer.addVertex(vPlane);
+    //
+//strategy A : create an edge connect PlaneParamPoint with CameraPose
+    // EdgeMapPoint4Plane2 *_e2 = new EdgeMapPoint4Plane2();
+    // _e2->setVertex(0, vPlane);
+    // _e2->setVertex(1,vSE3);
+    // _e2->setMeasurement(1.0);
+    // _e2->setInformation(1000 * Eigen::Matrix<double,1,1>::Identity());
+    // optimizer.addEdge(_e2);
+    // _e2->setLevel(0);
+//strategy B: for each inliners MapPoint,we create an edge between it with Camera pose. For detail,see below. 
     // Set MapPoint vertices
     const int N = pFrame->N;
 
@@ -273,15 +301,83 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     const float deltaMono = sqrt(5.991);
     const float deltaStereo = sqrt(7.815);
 
+    // vector<UnaryEdgeMapPoint2Plane0*> vpEdgesmap;
+    // vector<size_t> vnIndexEdgesmap;
+    // vpEdgesmap.reserve(N);
+    // vnIndexEdgesmap.reserve(N);
 
-    {
+    vector<MapPoint*> ransac_datas;
+
+{
     unique_lock<mutex> lock(MapPoint::mGlobalMutex);
 
     for(int i=0; i<N; i++)
     {
+        cv::KeyPoint* pKP = &pFrame->mvKeys[i];
         MapPoint* pMP = pFrame->mvpMapPoints[i];
-        if(pMP)
+        if(pMP && pKP && !pMP->isBad())
         {
+
+            // cv::Point2f c11(200,700);
+            // cv::Point2f c12(1620,700);
+            // cv::Point2f c22(1847,1078);
+            // cv::Point2f c21(0,1078);
+            cv::Point2f c11(40,210);
+            cv::Point2f c12(420,210);
+            cv::Point2f c22(520,290);
+            cv::Point2f c21(0,290);
+            if(pKP->pt.x > c21.x && pKP->pt.y > c11.y && pKP->pt.x < c22.x && pKP->pt.y < c22.y)
+            {
+                float xly = (c21.x-c11.x)/(c21.y-c11.y);//负数
+                float xry = (c22.x-c12.x)/(c22.y-c12.y);//x|y 是为了防止90°斜率不存在
+                float dxl = pKP->pt.x - c11.x;
+                float dyl = pKP->pt.y - c11.y;
+                float dxr = pKP->pt.x - c12.x;
+                float dyr = pKP->pt.y - c12.y;
+                if(dxl/dyl > xly && dxr/dyr < xry)
+                    {
+                        //进入这里的是地面候选map点。通过ransac得到的inliners才是真正的map points
+                        ransac_datas.push_back(pMP);
+                    }
+            }
+        }
+    }
+    double outPlaneD = 0;
+    Ransac ransacPlaned;
+    //printf("Data may be on ground :%lf \n", ransac_datas.size());
+    //redesigned the ransac,map points as input, and will change MapPoints' property: isGround 
+   // cout<< _vp<<endl;
+    ransacPlaned.RansacFitPlaneD(ransac_datas, ransac_datas.size(), _vp.segment(0,3), 0.1, outPlaneD);
+    printf("Ransac result plane d: %lf \n", outPlaneD);
+
+    for(int i=0; i<N; i++)
+    {
+        MapPoint* pMP = pFrame->mvpMapPoints[i];
+        if(pMP && !pMP->isBad())
+        {
+            if(pMP->isGround)
+            {
+                //Edge to refine the PlaneParams Vertex, It can be remove if you don not optimize PlaneParams any more (=just trust Ransac)
+                UnaryEdgeMapPoint2Plane0 *e0 = new UnaryEdgeMapPoint2Plane0();
+                e0->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(1)));//1 :PlaneParams
+                e0->setMeasurement(Converter::toVector3d(pMP->GetWorldPos()));
+                e0->setInformation(10*Eigen::Matrix<double,1,1>::Identity());
+                e0->setLevel(0);
+                optimizer.addEdge(e0);
+
+                //strategy B: for each inliners MapPoint,we create an edge between it with Camera pose.
+                UnaryEdgePose2MapPoint *ep0 = new UnaryEdgePose2MapPoint();
+                ep0->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));//0: pose
+                Eigen::Matrix<double, 6,1> measure;
+                measure.segment(0,3) = Converter::toVector3d(pMP->GetWorldPos());
+                measure.segment(3,3) = _vp.segment(0,3);
+                ep0->setMeasurement(measure);
+                ep0->setInformation(10*Eigen::Matrix<double,1,1>::Identity());
+                ep0->setLevel(0);
+                optimizer.addEdge(ep0);
+            }
+
+
             // Monocular observation
             if(pFrame->mvuRight[i]<0)
             {
@@ -447,170 +543,171 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     cv::Mat pose = Converter::toCvMat(SE3quat_recov);
     pFrame->SetPose(pose);
 
+    VertexParam4Plane *result_params = static_cast<VertexParam4Plane*>(optimizer.vertex(1));
+    pFrame->mPlaneParams = Converter::toCvMat(result_params->estimate());
+
     return nInitialCorrespondences-nBad;
 }
-
+//GroundOpimization 已废弃。平面优化融合到了PoseOpimizaiton和Local BA中去了。
 cv::Mat Optimizer::GroundOpimization(Frame *pFrame,Tracking *mpTracker,cv::Mat OriParams)
 {
     //1.前面区域点拟合出平面
     //2.平面和最近5帧前进方向平行。或者与traj平面平行
     //Ax+By+Cz +D = 0 xN
     //Vector(A,B,C).dot(CameraVector) = 0 
-      // some handy typedefs
+    //Draw a possible plane area ;
+    //    c11  c12
+    // c21         c22
+    //     int MapInPlaneNum = 0;
+    //     cv::Point2f c11(200,700);
+    //     cv::Point2f c12(1620,700);
+    //     cv::Point2f c22(1847,1078);
+    //     cv::Point2f c21(0,1078);
+    //     // cv::Point2f c11(40,210);
+    //     // cv::Point2f c12(420,210);
+    //     // cv::Point2f c22(520,290);
+    //     // cv::Point2f c21(0,290);
+    //     Eigen::Matrix4d CurPose = Converter::toMatrix4d(mpTracker->mCurrentFrame.mTcw);
+    //    //double oriVect[3] ={0,-1,0};
+    //    // cv::Mat OriVect = cv::Mat(4,1,CV_32F,DefaultReturn);
+    //     Eigen::Vector4d OriVect1,OriVect0;
+    //     OriVect1<<0,1,0,1;
+    //     OriVect0<<0,0,0,1;
+    //     Eigen::Vector4d CurVect = CurPose.inverse() * OriVect1 - CurPose.inverse() *OriVect0;
+    //     Eigen::Vector3d CurV3(CurVect(0), CurVect(1), CurVect(2));
+    //    // printf("Current Vector of plane: %lf  %lf  %lf  %lf\n",CurV3(0), CurV3(1), CurV3(2), CurVect(3));
+    //    // Eigen::Vector3d CurV3(CurVect.at<float>(0), CurVect.at<float>(1), CurVect.at<float>(2));
+    //     //Eigen::Vector4d LastVect = CurPose.inverse() * Converter::toVector4d(OriParams);
+    //     //printf("Last Vector of plane: %lf  %lf  %lf  %lf\n",LastVect(0), LastVect(1), LastVect(2), LastVect(3));
 
-    // setup the solver
+    //     VertexParam1Plane* params = new VertexParam1Plane;
+    //     params->setId(0);
+    //     params->setEstimate(OriParams.at<float>(3)); // some initial value for the params
+    //     optimizer.addVertex(params);
+        
+    //     {
+    //     //unique_lock<mutex> lock(MapPoint::mGlobalMutex);
+    //     for(int i=0; i < pFrame->N; i++)
+    //     {
+    //         cv::KeyPoint* pKP = &pFrame->mvKeys[i];
+    //         MapPoint* pMP = pFrame->mvpMapPoints[i];
+    //         if(pMP && pKP && !pMP->isBad())
+    //             if(pKP->pt.x > c21.x && pKP->pt.y > c11.y && pKP->pt.x < c22.x && pKP->pt.y < c22.y)
+    //             {
+    //                 float xly = (c21.x-c11.x)/(c21.y-c11.y);//负数
+    //                 float xry = (c22.x-c12.x)/(c22.y-c12.y);
+    //                 float dxl = pKP->pt.x - c11.x;
+    //                 float dyl = pKP->pt.y - c11.y;
+    //                 float dxr = pKP->pt.x - c12.x;
+    //                 float dyr = pKP->pt.y - c12.y;
+    //                 if(dxl/dyl > xly && dxr/dyr < xry)
+    //                     {
+    //                         //计入地面区
+    //                         Eigen::Vector3d pos = Converter::toVector3d(pMP->GetWorldPos());
+    //                         double dist = pos(0)*CurV3(0) + pos(1)*CurV3(1) + pos(2)*CurV3(2) + OriParams.at<float>(3);
+    //                         dist /= CurV3.norm();
+    //                         //printf("==%lf== ", dist);
+    //                         // if(abs(dist) > 1)
+    //                         //       continue;
+    //                         EdgeMapPoint1Plane* e = new EdgeMapPoint1Plane;
+    //                         e->setInformation(Eigen::Matrix<double, 1, 1>::Identity());
+    //                         e->setVertex(0,params);
+    //                        // printf("candidate point: %lf %lf %lf\n",pos(0), pos(1), pos(2));
+    //                         Eigen::Matrix<double,6,1> pos_vec;
+    //                         pos_vec<<pos(0),pos(1),pos(2),CurV3(0),CurV3(1),CurV3(2);
+    //                         e->setMeasurement(pos_vec);
+    //                         optimizer.addEdge(e);
+    //                         //********Ransac************
+    //                         Ransac_PointsY_data.push_back(pos);
+    //                         //Ransac_PlaneABC.push_back(CurV3);
+    //                         MapInPlaneNum++;
+    //                         pMP->isGround = true;
+    //                     }
+    //             }
+    //     }
+    //     printf("found only %d points on the ground!\n",MapInPlaneNum);
+    //     }//lock mutex
+    //     {  //2.平面和最近5帧前进方向平行。或者与traj平面平行
+    //        //Frame Pose 添加边
+    //        //Frame Pose 是相对与KeyFrame，KeyFrame Pose是相对与于第一帧的
 
-    g2o::SparseOptimizer optimizer;
-    optimizer.setVerbose(false);
+    //         // std::vector<KeyFrame*> vpReferences;
+    //         // vpReferences.reserve(mpTracker->mlpReferences.size());
+    //         // std::copy(std::begin(mpTracker->mlpReferences), std::end(mpTracker->mlpReferences), std::back_inserter(vpReferences));
 
-    g2o::BlockSolverX::LinearSolverType * linearSolver;
+    //         // std::vector<cv::Mat> vpRelativeFramePoses;
+    //         // vpReferences.reserve(mpTracker->mlRelativeFramePoses.size());
+    //         // std::copy(std::begin(mpTracker->mlRelativeFramePoses), std::end(mpTracker->mlRelativeFramePoses), std::back_inserter(vpRelativeFramePoses));
 
-    linearSolver = new g2o::LinearSolverDense<g2o::BlockSolverX::PoseMatrixType>();
+    //         // auto fID = pFrame->mnId;
+    //         // if(!vpReferences[fID-1]->isBad())
+    //         // {
+    //         //     cv::Mat Trw = cv::Mat::eye(4,4,CV_32F);
+    //         //     cv::Mat Trw4 = Trw*vpReferences[fID-1]->GetPose();
+    //         //     cv::Mat Trw3 = Trw*vpReferences[fID-2]->GetPose();
+    //         //     cv::Mat Trw2 = Trw*vpReferences[fID-3]->GetPose();
+    //         //     cv::Mat Trw1 = Trw*vpReferences[fID-4]->GetPose();
 
-    g2o::BlockSolverX * solver_ptr = new g2o::BlockSolverX(linearSolver);
+    //         //     cv::Mat Tcw4 = vpRelativeFramePoses[fID-1]*Trw4;
+    //         //     cv::Mat Tcw3 = vpRelativeFramePoses[fID-2]*Trw3;
+    //         //     cv::Mat Tcw2 = vpRelativeFramePoses[fID-3]*Trw2;
+    //         //     cv::Mat Tcw1 = vpRelativeFramePoses[fID-4]*Trw1;
 
-    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+    //         //     cv::Mat Rwc4 = Tcw4.rowRange(0,3).colRange(0,3).t();
+    //         //     cv::Mat twc4 = -Rwc4*Tcw4.rowRange(0,3).col(3);
+    //         //     cv::Mat Rwc3 = Tcw3.rowRange(0,3).colRange(0,3).t();
+    //         //     cv::Mat twc3 = -Rwc3*Tcw3.rowRange(0,3).col(3);
+    //         //     cv::Mat Rwc2 = Tcw2.rowRange(0,3).colRange(0,3).t();
+    //         //     cv::Mat twc2 = -Rwc2*Tcw2.rowRange(0,3).col(3);
+    //         //     cv::Mat Rwc1 = Tcw1.rowRange(0,3).colRange(0,3).t();
+    //         //     cv::Mat twc1 = -Rwc1*Tcw1.rowRange(0,3).col(3);
 
-    optimizer.setAlgorithm(solver);
+    //         //     //求解前进方向向量
+    //         //     Eigen::Vector3d ver42 = Converter::toVector3d(twc4) - Converter::toVector3d(twc2);
+    //         //     Eigen::Vector3d ver31 = Converter::toVector3d(twc3) - Converter::toVector3d(twc1);
+    //         //     Eigen::Vector3d ver41 = Converter::toVector3d(twc4) - Converter::toVector3d(twc1);
 
-    double DefaultReturn[4] ={0,1,0,0};
-    if(OriParams.empty())
-    {
-        OriParams = cv::Mat(4,1,CV_32F,DefaultReturn);
-    }
-    //cv::Mat tmp = OriParams;
-    //Eigen::Vector4d st0(tmp.at<double>(0),tmp.at<double>(1),tmp.at<double>(2),tmp.at<double>(3));
-    //MapPint添加边
-    int MapInPlaneNum = 0;
-    cv::Point2f c11(190,210);
-    cv::Point2f c12(250,210);
-    cv::Point2f c22(480,290);
-    cv::Point2f c21(20,290);
-    Eigen::Matrix4d CurPose = Converter::toMatrix4d(mpTracker->mCurrentFrame.mTcw);
-   //double oriVect[3] ={0,-1,0};
-   // cv::Mat OriVect = cv::Mat(4,1,CV_32F,DefaultReturn);
-    Eigen::Vector4d OriVect1,OriVect0;
-    OriVect1<<0,1,0,1;
-    OriVect0<<0,0,0,1;
-    Eigen::Vector4d CurVect = CurPose.inverse() * OriVect1 - CurPose.inverse() *OriVect0;
-    Eigen::Vector3d CurV3(CurVect(0), CurVect(1), CurVect(2));
-    //printf("Current Vector of plane: %lf  %lf  %lf  %lf\n",CurV3(0), CurV3(1), CurV3(2), CurVect(3));
-   // Eigen::Vector3d CurV3(CurVect.at<float>(0), CurVect.at<float>(1), CurVect.at<float>(2));
-    //Eigen::Vector4d LastVect = CurPose.inverse() * Converter::toVector4d(OriParams);
-    //printf("Last Vector of plane: %lf  %lf  %lf  %lf\n",LastVect(0), LastVect(1), LastVect(2), LastVect(3));
+    //         //     EdgeLinellPlane* e42 = new EdgeLinellPlane;
+    //         //     e42->setInformation(Eigen::Matrix<double, 1, 1>::Identity());
+    //         //     e42->setVertex(0,params);
+    //         //     e42->setMeasurement(ver42);
+    //         //     optimizer.addEdge(e42);
 
-    VertexParam1Plane* params = new VertexParam1Plane;
-    params->setId(0);
-    params->setEstimate(OriParams.at<float>(3)); // some initial value for the params
-    optimizer.addVertex(params);
+    //         //     EdgeLinellPlane* e31 = new EdgeLinellPlane;
+    //         //     e31->setInformation(Eigen::Matrix<double, 1, 1>::Identity());
+    //         //     e31->setVertex(0,params);
+    //         //     e31->setMeasurement(ver31);
+    //         //     optimizer.addEdge(e31);
+
+    //         //     EdgeLinellPlane* e41 = new EdgeLinellPlane;
+    //         //     e41->setInformation(Eigen::Matrix<double, 1, 1>::Identity());
+    //         //     e41->setVertex(0,params);
+    //         //     e41->setMeasurement(ver41);
+    //         //     optimizer.addEdge(e41);
+    //         }
     
-    {
-    //unique_lock<mutex> lock(MapPoint::mGlobalMutex);
-    for(int i=0; i < pFrame->N; i++)
-    {
-        cv::KeyPoint* pKP = &pFrame->mvKeys[i];
-        MapPoint* pMP = pFrame->mvpMapPoints[i];
-        if(pMP && pKP && !pMP->isBad())
-            if(pKP->pt.x > c21.x && pKP->pt.y > c11.y && pKP->pt.x < c22.x && pKP->pt.y < c22.y)
-            {
-                float xly = (c21.x-c11.x)/(c21.y-c11.y);//负数
-                float xry = (c22.x-c12.x)/(c22.y-c12.y);
-                float dxl = pKP->pt.x - c11.x;
-                float dyl = pKP->pt.y - c11.y;
-                float dxr = pKP->pt.x - c12.x;
-                float dyr = pKP->pt.y - c12.y;
-                if(dxl/dyl > xly && dxr/dyr < xry)
-                    {
-                        //计入地面区域
-                        MapInPlaneNum++;
-                        pMP->isGround = true;
-                        EdgeMapPoint1Plane* e = new EdgeMapPoint1Plane;
-                        e->setInformation(Eigen::Matrix<double, 1, 1>::Identity());
-                        e->setVertex(0,params);
-                        Eigen::Vector3d pos = Converter::toVector3d(pMP->GetWorldPos());
-                        if(pos(1) > 2)
-                            continue;
-                       // printf("candidate point: %lf %lf %lf\n",pos(0), pos(1), pos(2));
-                        Eigen::Matrix<double,6,1> pos_vec;
-                        pos_vec<<pos(0),pos(1),pos(2),CurV3(0),CurV3(1),CurV3(2);
-                        e->setMeasurement(pos_vec);
-                        optimizer.addEdge(e);
-                    }
-            }
-    }
-    printf("found only %d points on the ground!\n",MapInPlaneNum);
-    }
-    //2.平面和最近5帧前进方向平行。或者与traj平面平行
-    //Frame Pose 添加边
-    //Frame Pose 是相对与KeyFrame，KeyFrame Pose是相对与于第一帧的
-    if (mpTracker->mlRelativeFramePoses.size() > 4 && mpTracker->mlpReferences.size() > 0 && MapInPlaneNum > 4)
-    {
-
-        // std::vector<KeyFrame*> vpReferences;
-        // vpReferences.reserve(mpTracker->mlpReferences.size());
-        // std::copy(std::begin(mpTracker->mlpReferences), std::end(mpTracker->mlpReferences), std::back_inserter(vpReferences));
-
-        // std::vector<cv::Mat> vpRelativeFramePoses;
-        // vpReferences.reserve(mpTracker->mlRelativeFramePoses.size());
-        // std::copy(std::begin(mpTracker->mlRelativeFramePoses), std::end(mpTracker->mlRelativeFramePoses), std::back_inserter(vpRelativeFramePoses));
-
-        // auto fID = pFrame->mnId;
-        // if(!vpReferences[fID-1]->isBad())
-        // {
-        //     cv::Mat Trw = cv::Mat::eye(4,4,CV_32F);
-        //     cv::Mat Trw4 = Trw*vpReferences[fID-1]->GetPose();
-        //     cv::Mat Trw3 = Trw*vpReferences[fID-2]->GetPose();
-        //     cv::Mat Trw2 = Trw*vpReferences[fID-3]->GetPose();
-        //     cv::Mat Trw1 = Trw*vpReferences[fID-4]->GetPose();
-
-        //     cv::Mat Tcw4 = vpRelativeFramePoses[fID-1]*Trw4;
-        //     cv::Mat Tcw3 = vpRelativeFramePoses[fID-2]*Trw3;
-        //     cv::Mat Tcw2 = vpRelativeFramePoses[fID-3]*Trw2;
-        //     cv::Mat Tcw1 = vpRelativeFramePoses[fID-4]*Trw1;
-
-        //     cv::Mat Rwc4 = Tcw4.rowRange(0,3).colRange(0,3).t();
-        //     cv::Mat twc4 = -Rwc4*Tcw4.rowRange(0,3).col(3);
-        //     cv::Mat Rwc3 = Tcw3.rowRange(0,3).colRange(0,3).t();
-        //     cv::Mat twc3 = -Rwc3*Tcw3.rowRange(0,3).col(3);
-        //     cv::Mat Rwc2 = Tcw2.rowRange(0,3).colRange(0,3).t();
-        //     cv::Mat twc2 = -Rwc2*Tcw2.rowRange(0,3).col(3);
-        //     cv::Mat Rwc1 = Tcw1.rowRange(0,3).colRange(0,3).t();
-        //     cv::Mat twc1 = -Rwc1*Tcw1.rowRange(0,3).col(3);
-
-        //     //求解前进方向向量
-        //     Eigen::Vector3d ver42 = Converter::toVector3d(twc4) - Converter::toVector3d(twc2);
-        //     Eigen::Vector3d ver31 = Converter::toVector3d(twc3) - Converter::toVector3d(twc1);
-        //     Eigen::Vector3d ver41 = Converter::toVector3d(twc4) - Converter::toVector3d(twc1);
-
-        //     EdgeLinellPlane* e42 = new EdgeLinellPlane;
-        //     e42->setInformation(Eigen::Matrix<double, 1, 1>::Identity());
-        //     e42->setVertex(0,params);
-        //     e42->setMeasurement(ver42);
-        //     optimizer.addEdge(e42);
-
-        //     EdgeLinellPlane* e31 = new EdgeLinellPlane;
-        //     e31->setInformation(Eigen::Matrix<double, 1, 1>::Identity());
-        //     e31->setVertex(0,params);
-        //     e31->setMeasurement(ver31);
-        //     optimizer.addEdge(e31);
-
-        //     EdgeLinellPlane* e41 = new EdgeLinellPlane;
-        //     e41->setInformation(Eigen::Matrix<double, 1, 1>::Identity());
-        //     e41->setVertex(0,params);
-        //     e41->setMeasurement(ver41);
-        //     optimizer.addEdge(e41);
-        }
-    // else
-    //     return OriParams;
-    optimizer.initializeOptimization();
-    optimizer.optimize(10);
-    double PlaneParamd = params->estimate();
-    Eigen::Vector4d PlaneParams(CurV3(0),CurV3(1),CurV3(2),PlaneParamd);
-   // Eigen::Vector4d PlaneParams2l = CurPose * (PlaneParams + CurPose * OriVect0) ;
-    printf("Result plane paras: %lf  %lf  %lf  %lf\n",PlaneParams(0), PlaneParams(1), PlaneParams(2),PlaneParams(3));
-    //printf("Result plane paras2l: %lf  %lf  %lf  %lf\n",PlaneParams2l(0), PlaneParams2l(1), PlaneParams2l(2),PlaneParams2l(3));
-    cv::Mat result = Converter::toCvMat(PlaneParams);
-    return result;
+    //    // 开始优化 or Ransac
+    //     if (mpTracker->mlRelativeFramePoses.size() > 3 && mpTracker->mlpReferences.size() > 0 && MapInPlaneNum > 4)
+    //     {
+    //         optimizer.initializeOptimization();
+    //         optimizer.optimize(10);
+    //         double PlaneParamd = params->estimate();
+    //         //printf("BA result plane d: %lf \n", PlaneParamd);
+    //         // *********Ransac*********
+    //         //Ransac_PlaneABC = CurV3;
+    //         double outPlaneD = 0.88;
+    //        // Ransac ransacPlaned;
+    //         //ransacPlaned.RansacFitPlaneD(Ransac_PointsY_data, MapInPlaneNum, CurV3, 0.2, outPlaneD);
+    //        // printf("Ransac result plane d: %lf \n", outPlaneD);
+    //        // Ransac_PointsY_data.clear();
+    //         Eigen::Vector4d PlaneParams(CurV3(0),CurV3(1),CurV3(2),outPlaneD);
+    //         //printf("Result plane paras: %lf  %lf  %lf  %lf\n",PlaneParams(0), PlaneParams(1), PlaneParams(2),PlaneParams(3));
+    //         //printf("Result plane paras2l: %lf  %lf  %lf  %lf\n",PlaneParams2l(0), PlaneParams2l(1), PlaneParams2l(2),PlaneParams2l(3));
+    //         cv::Mat result = Converter::toCvMat(PlaneParams);
+    //         return result;
+    //     }
+    //     else
+    //         return OriParams;
 }
 void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap)
 {    
@@ -666,15 +763,21 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
     }
 
     // Setup optimizer
-    g2o::SparseOptimizer optimizer;
-    g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
+    // g2o::SparseOptimizer optimizer;
+    // g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
 
-    linearSolver = new g2o::LinearSolverEigen<g2o::BlockSolver_6_3::PoseMatrixType>();
+    // linearSolver = new g2o::LinearSolverEigen<g2o::BlockSolver_6_3::PoseMatrixType>();
 
-    g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
+    // g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
 
-    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
-    optimizer.setAlgorithm(solver);
+    // g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+    // optimizer.setAlgorithm(solver);
+        g2o::SparseOptimizer optimizer;
+        g2o::BlockSolverX::LinearSolverType * linearSolver;
+        linearSolver = new g2o::LinearSolverDense<g2o::BlockSolverX::PoseMatrixType>();
+        g2o::BlockSolverX * solver_ptr = new g2o::BlockSolverX(linearSolver);
+        g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+        optimizer.setAlgorithm(solver);
 
     if(pbStopFlag)
         optimizer.setForceStopFlag(pbStopFlag);
@@ -728,8 +831,38 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
     vector<MapPoint*> vpMapPointEdgeStereo;
     vpMapPointEdgeStereo.reserve(nExpectedSize);
 
+    vector<BinaryEdgePose2MapPoint*> vpEdgesmap;
+    vpEdgesmap.reserve(nExpectedSize);
+
     const float thHuberMono = sqrt(5.991);
     const float thHuberStereo = sqrt(7.815);
+
+//create a plane params vertex
+    VertexParam4Plane* vPlane = new VertexParam4Plane();
+    //STRATEGY 1
+    // Eigen::Vector4d _vp = Converter::toVector4d(pKF->GetPoseInverse().col(1));
+    // _vp(3) = 0.88;
+    //STRATEGY 2
+    Eigen::Vector4d _vp = Converter::toVector4d(pKF->mPlaneParams);
+    vPlane->setEstimate(_vp);
+    vPlane->setId(maxKFid+1);
+    vPlane->setMarginalized(false);
+    optimizer.addVertex(vPlane);
+    
+    //ATTENTION！！ different from PoseOptimization
+    maxKFid += 1;
+    //STRATEGY A
+    //create an edge keep plane away from camera 0.88, it also can be designed as a binaryEdge??
+    // EdgeMapPoint4Plane2 *_e1 = new EdgeMapPoint4Plane2();
+    // _e1->setVertex(0, vPlane);
+    // _e1->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKF->mnId)));
+    // //Eigen::Vector3d vCt = Converter::toVector3d(pKF->GetCameraCenter());
+    // //printf("camera center: %lf  %lf  %lf \n",vCt(0), vCt(1), vCt(2));
+    // _e1->setMeasurement(1.0);
+    // _e1->setInformation(1000 * Eigen::Matrix<double,1,1>::Identity());
+    // optimizer.addEdge(_e1);
+    // _e1->setLevel(0);
+
 
     for(list<MapPoint*>::iterator lit=lLocalMapPoints.begin(), lend=lLocalMapPoints.end(); lit!=lend; lit++)
     {
@@ -740,6 +873,29 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         vPoint->setId(id);
         vPoint->setMarginalized(true);
         optimizer.addVertex(vPoint);
+
+// !!!Attention!!!=====Point2 's type has changed !!!VertexSE3Expmap
+        if(pMP->isGround)
+        {
+            BinaryEdgeMapPoint2Plane0 *ev = new BinaryEdgeMapPoint2Plane0();
+            ev->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(maxKFid)));//PlaneParams Vertex, maxKFid +1了
+            ev->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id))); //mappoint
+            ev->setMeasurement(1.0);
+            ev->setInformation(10*Eigen::Matrix<double, 1, 1>::Identity());
+            optimizer.addEdge(ev);
+            ev->setLevel(0);
+            
+            //STRATEGY B
+            BinaryEdgePose2MapPoint *epp = new BinaryEdgePose2MapPoint();
+            epp->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKF->mnId)));//KeyFrame Pose Vertex, maxKFid +1了
+            epp->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id))); //mappoint
+            epp->setMeasurement(_vp.segment(0,3));
+            epp->setInformation(10*Eigen::Matrix<double, 1, 1>::Identity());
+            optimizer.addEdge(epp);
+            epp->setLevel(0);
+
+            vpEdgesmap.push_back(epp);
+        }
 
         const map<KeyFrame*,size_t> observations = pMP->GetObservations();
 
@@ -764,7 +920,6 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
                     e->setMeasurement(obs);
                     const float &invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
                     e->setInformation(Eigen::Matrix2d::Identity()*invSigma2);
-
                     g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
                     e->setRobustKernel(rk);
                     rk->setDelta(thHuberMono);
@@ -810,7 +965,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
                     vpMapPointEdgeStereo.push_back(pMP);
                 }
             }
-        }
+        }  
     }
 
     if(pbStopFlag)
@@ -861,6 +1016,16 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
 
         e->setRobustKernel(0);
     }
+    // for(size_t i=0, iend=vpEdgesmap.size(); i<iend; i++)
+    // {
+    //     BinaryEdgePose2MapPoint *e = vpEdgesmap[i];
+    //     MapPoint* pMP = vpMapPointEdgeStereo[i];
+    //     if(pMP->isBad())
+    //         continue;
+    //     // printf("==%lf== ",e->chi2());
+    //     // if(e->chi2()>5)
+    //     //     e->setLevel(1);
+    // }
 
     // Optimize again without the outliers
 
@@ -918,7 +1083,10 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
     }
 
     // Recover optimized data
-
+    VertexParam4Plane* vpResult = static_cast<VertexParam4Plane*>(optimizer.vertex(maxKFid));
+    Eigen::Vector4d PlaneParam = vpResult->estimate();
+    pKF->mPlaneParams = Converter::toCvMat(PlaneParam);
+    printf("plane params local ba: %lf %lf %lf  %lf\n",PlaneParam(0), PlaneParam(1), PlaneParam(2), PlaneParam(3));
     //Keyframes
     for(list<KeyFrame*>::iterator lit=lLocalKeyFrames.begin(), lend=lLocalKeyFrames.end(); lit!=lend; lit++)
     {

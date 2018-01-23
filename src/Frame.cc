@@ -47,7 +47,7 @@ Frame::Frame(const Frame &frame)
      mpReferenceKF(frame.mpReferenceKF), mnScaleLevels(frame.mnScaleLevels),
      mfScaleFactor(frame.mfScaleFactor), mfLogScaleFactor(frame.mfLogScaleFactor),
      mvScaleFactors(frame.mvScaleFactors), mvInvScaleFactors(frame.mvInvScaleFactors),
-     mvLevelSigma2(frame.mvLevelSigma2), mvInvLevelSigma2(frame.mvInvLevelSigma2)
+     mvLevelSigma2(frame.mvLevelSigma2), mvInvLevelSigma2(frame.mvInvLevelSigma2), mPlaneParams(frame.mPlaneParams)
 {
     for(int i=0;i<FRAME_GRID_COLS;i++)
         for(int j=0; j<FRAME_GRID_ROWS; j++)
@@ -91,6 +91,17 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     // 计算双目间的匹配, 匹配成功的特征点会计算其深度
     // 深度存放在mvuRight 和 mvDepth 中
     ComputeStereoMatches();
+    //show mvkeys[] mvkeysRight[]
+    // cv::Mat img_left, img_right;
+    // cv::drawKeypoints(imLeft, mvKeys, img_left);
+    // cv::drawKeypoints(imRight,mvKeysRight,img_right);
+    // cv::imshow("keypoints in left",img_left);
+    // cv::imshow("keypoints in right",img_right);
+    // cv::waitKey(0);
+    // cv::Mat img_matches;
+    // cv::drawMatches(imLeft, mvKeys, imRight, mvKeysRight, mkeypointsMatches, img_matches);
+    // cv::imshow("matches result", img_matches);
+    // cv::waitKey(0);
 
     mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));    
     mvbOutlier = vector<bool>(N,false);
@@ -487,7 +498,8 @@ void Frame::ComputeStereoMatches()
     {
         const cv::KeyPoint &kp = mvKeysRight[iR];
         const float &kpY = kp.pt.y;
-        const float r = 2.0f*mvScaleFactors[mvKeysRight[iR].octave];
+        //TODO:放宽r 2.0f -> 3.0f
+        const float r = 3.0f*mvScaleFactors[mvKeysRight[iR].octave];
         const int maxr = ceil(kpY+r);
         const int minr = floor(kpY-r);
 
@@ -622,13 +634,17 @@ void Frame::ComputeStereoMatches()
                 mvDepth[iL]=mbf/disparity;
                 mvuRight[iL] = bestuR;
                 vDistIdx.push_back(pair<int,int>(bestDist,iL));
+                cv::DMatch pair1to2(iL, bestIdxR, bestDist);
+                mkeypointsMatches.push_back(pair1to2);
             }
         }
     }
 
     sort(vDistIdx.begin(),vDistIdx.end());
     const float median = vDistIdx[vDistIdx.size()/2].first;
-    const float thDist = 1.5f*1.4f*median;
+    //TODO: 放宽thDist
+    const float thDist = 1.8f*1.4f*median;
+    //const float thDist = 1.5f*1.4f*median;
 
     for(int i=vDistIdx.size()-1;i>=0;i--)
     {

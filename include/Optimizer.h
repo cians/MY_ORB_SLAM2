@@ -21,27 +21,29 @@
 #ifndef OPTIMIZER_H
 #define OPTIMIZER_H
 
-#include <Eigen/Core>
+#include <Eigen/Eigen>
+#include <vector>
 #include "Map.h"
 #include "MapPoint.h"
 #include "KeyFrame.h"
 #include "LoopClosing.h"
 #include "Frame.h"
+#include "Ransac.h"
 
 #include "Thirdparty/g2o/g2o/types/types_seven_dof_expmap.h"
 #include "Thirdparty/g2o/g2o/types/types_six_dof_expmap.h"
+#include "Thirdparty/g2o/g2o/core/base_multi_edge.h"
 
 namespace ORB_SLAM2
 {
-
+class Ransac;
 class LoopClosing;
 //拟合平面需要的顶点和边
 class VertexParam4Plane: public g2o::BaseVertex<4, Eigen::Vector4d>
 {
   public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-    VertexParam4Plane(){}
-
+    VertexParam4Plane(){};
     virtual bool read(std::istream& /*is*/)
     {
       cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
@@ -67,22 +69,22 @@ class VertexParam4Plane: public g2o::BaseVertex<4, Eigen::Vector4d>
     }
 
 };
-
-class EdgeMapPoint4Plane : public g2o::BaseUnaryEdge<1, Eigen::Vector3d, VertexParam4Plane>
+class UnaryEdgeMapPoint2Plane0 : public g2o::BaseUnaryEdge<1, Eigen::Vector3d, VertexParam4Plane>
 {
     public:
       EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-      EdgeMapPoint4Plane(){}
+      UnaryEdgeMapPoint2Plane0(){};
       virtual bool read(std::istream& /*is*/)
-        {
+      {
         cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
         return false;
-        }
+      }
+
       virtual bool write(std::ostream& /*os*/) const
-        {
+      {
         cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
         return false;
-        }
+      }
 
       void computeError()
       {
@@ -92,7 +94,131 @@ class EdgeMapPoint4Plane : public g2o::BaseUnaryEdge<1, Eigen::Vector3d, VertexP
           const double& c = params->estimate()(2);
           const double& d = params->estimate()(3);
           double res = a*measurement()(0) + b*measurement()(1) + c*measurement()(2) + d;
-          _error(0) = res;
+          _error(0) = abs(res)/sqrt(a*a +b*b +c*c);
+      }
+
+}; 
+class BinaryEdgeMapPoint2Plane0 : public g2o::BaseBinaryEdge<1, double, VertexParam4Plane,  g2o::VertexSBAPointXYZ>
+{
+    public:
+      EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+      BinaryEdgeMapPoint2Plane0(){};
+      virtual bool read(std::istream& /*is*/)
+      {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+      }
+
+      virtual bool write(std::ostream& /*os*/) const
+      {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+      }
+
+      void computeError()
+      {
+          const VertexParam4Plane *params = dynamic_cast<const VertexParam4Plane*>(vertex(0));
+          const g2o::VertexSBAPointXYZ *CaPt = dynamic_cast<const  g2o::VertexSBAPointXYZ*>(vertex(1)); 
+          const double& a = params->estimate()(0);
+          const double& b = params->estimate()(1);
+          const double& c = params->estimate()(2);
+          const double& d = params->estimate()(3);
+          double res = a*CaPt->estimate()(0) + b*CaPt->estimate()(1) + c*CaPt->estimate()(2) + d;
+          _error(0) = measurement()*abs(res)/sqrt(a*a +b*b +c*c);
+      }
+
+};  
+
+class BinaryEdgePose2MapPoint : public g2o::BaseBinaryEdge<1, Eigen::Vector3d,  g2o::VertexSE3Expmap, g2o::VertexSBAPointXYZ>
+{
+    public:
+      EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+      BinaryEdgePose2MapPoint(){};
+      virtual bool read(std::istream& /*is*/)
+      {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+      }
+
+      virtual bool write(std::ostream& /*os*/) const
+      {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+      }
+      void computeError()
+      {
+          const g2o::VertexSE3Expmap *pPose = dynamic_cast<const  g2o::VertexSE3Expmap*>(vertex(0)); 
+          g2o::SE3Quat CamPose = pPose->estimate();
+          Eigen::Matrix<double,4,4> eigMat = CamPose.to_homogeneous_matrix(); 
+          Eigen::Vector3d center = -eigMat.block<3,3>(0,0).inverse()*eigMat.block<3,1>(0,3);
+          const g2o::VertexSBAPointXYZ *pMapPoint = dynamic_cast<const  g2o::VertexSBAPointXYZ*>(vertex(1)); 
+          Eigen::Vector3d center2MapP = center - pMapPoint->estimate();
+          double cast_distance = center2MapP.dot(measurement().normalized());
+          _error(0) = abs(cast_distance) - 0.88;
+      }
+
+};
+//use UnaryEdge because poseOptimization doesn’t optimizate the map points.  use mapPoint+vector as measuerment.
+class UnaryEdgePose2MapPoint : public g2o::BaseUnaryEdge<1, Eigen::Matrix<double, 6, 1>,  g2o::VertexSE3Expmap>
+{
+      public:
+      EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+      UnaryEdgePose2MapPoint(){};
+      virtual bool read(std::istream& /*is*/)
+      {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+      }
+
+      virtual bool write(std::ostream& /*os*/) const
+      {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+      }
+      void computeError()
+      {
+          const g2o::VertexSE3Expmap *pPose = dynamic_cast<const  g2o::VertexSE3Expmap*>(vertex(0)); 
+          g2o::SE3Quat CamPose = pPose->estimate();
+          Eigen::Matrix<double,4,4> eigMat = CamPose.to_homogeneous_matrix(); 
+          Eigen::Vector3d center = -eigMat.block<3,3>(0,0).inverse()*eigMat.block<3,1>(0,3); 
+          Eigen::Vector3d center2MapP = center - measurement().segment(0,3);
+          Eigen::Vector3d vect = measurement().segment(3,3);
+          double cast_distance = center2MapP.dot(vect.normalized());
+          _error(0) = abs(cast_distance) - 0.88;
+      }
+};
+//measurement ke当做权重
+class EdgePose2Plane : public g2o::BaseBinaryEdge<1, double, VertexParam4Plane,  g2o::VertexSE3Expmap>
+{
+    public:
+      EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+      EdgePose2Plane(){};
+      virtual bool read(std::istream& /*is*/)
+      {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+      }
+
+      virtual bool write(std::ostream& /*os*/) const
+      {
+        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+        return false;
+      }
+
+      void computeError()
+      {
+          const VertexParam4Plane *params = dynamic_cast<const VertexParam4Plane*>(vertex(0));
+          const g2o::VertexSE3Expmap *CaPt = dynamic_cast<const  g2o::VertexSE3Expmap*>(vertex(1)); 
+          g2o::SE3Quat CamPose = CaPt->estimate();
+          Eigen::Matrix<double,4,4> eigMat = CamPose.to_homogeneous_matrix(); 
+          Eigen::Vector3d center = -eigMat.block<3,3>(0,0).inverse()*eigMat.block<3,1>(0,3);
+          const double& a = params->estimate()(0);
+          const double& b = params->estimate()(1);
+          const double& c = params->estimate()(2);
+          const double& d = params->estimate()(3);
+          double res = a*center(0) + b*center(1) + c*center(2) + d;
+          res = abs(res)/sqrt(a*a +b*b +c*c);
+          _error(0) = res - 0.88;
       }
 
 };  
@@ -100,8 +226,7 @@ class VertexParam1Plane: public g2o::BaseVertex<1, double>
 {
   public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-    VertexParam1Plane(){}
-
+    VertexParam1Plane(){};
     virtual bool read(std::istream& /*is*/)
     {
       cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
@@ -131,17 +256,18 @@ class EdgeMapPoint1Plane : public g2o::BaseUnaryEdge<1, Eigen::Matrix<double,6,1
 {
     public:
       EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-      EdgeMapPoint1Plane(){}
-      virtual bool read(std::istream& /*is*/)
-        {
-        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
-        return false;
-        }
-      virtual bool write(std::ostream& /*os*/) const
-        {
-        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
-        return false;
-        }
+      EdgeMapPoint1Plane(){};
+    virtual bool read(std::istream& /*is*/)
+    {
+      cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+      return false;
+    }
+
+    virtual bool write(std::ostream& /*os*/) const
+    {
+      cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+      return false;
+    }
 
         void computeError()
         {
@@ -155,21 +281,23 @@ class EdgeMapPoint1Plane : public g2o::BaseUnaryEdge<1, Eigen::Matrix<double,6,1
         }
 
 }; 
+
 class EdgeLinellPlane : public g2o::BaseUnaryEdge<1, Eigen::Vector3d, VertexParam4Plane>
 {
     public:
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-        EdgeLinellPlane(){}
-        virtual bool read(std::istream& /*is*/)
-        {
-        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
-        return false;
-        }
-        virtual bool write(std::ostream& /*os*/) const
-        {
-        cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
-        return false;
-        }
+        EdgeLinellPlane(){};
+    virtual bool read(std::istream& /*is*/)
+    {
+      cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+      return false;
+    }
+
+    virtual bool write(std::ostream& /*os*/) const
+    {
+      cerr << __PRETTY_FUNCTION__ << " not implemented yet" << endl;
+      return false;
+    }
 
         void computeError()
         {
@@ -181,7 +309,7 @@ class EdgeLinellPlane : public g2o::BaseUnaryEdge<1, Eigen::Vector3d, VertexPara
             _error(0) = res;
         }
 };
-
+//D 为error information 的维度。E为measurement的类型。
 class Optimizer
 {
 public:

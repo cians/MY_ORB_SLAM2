@@ -47,6 +47,7 @@ public:
 
     // Draw last processed frame.
     cv::Mat DrawFrame();
+    cv::Mat mPloygonParams;
 
 protected:
 

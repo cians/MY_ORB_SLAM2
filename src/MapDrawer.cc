@@ -53,6 +53,7 @@ void MapDrawer::DrawMapPoints()
     if(vpMPs.empty())
         return;
 
+    //显示所有的地图点（不包括局部地图点），大小为2个像素，黑色
     glPointSize(mPointSize);
     glBegin(GL_POINTS);
     glColor3f(0.0,0.0,0.0);
@@ -66,6 +67,7 @@ void MapDrawer::DrawMapPoints()
     }
     glEnd();
 
+    //显示局部地图点，大小为2个像素，红色
     glPointSize(mPointSize);
     glBegin(GL_POINTS);
     glColor3f(1.0,0.0,0.0);
@@ -263,27 +265,41 @@ void MapDrawer::DrawGroundPlane(pangolin::OpenGlMatrix &Twc)
     //1. 以Z = 0 起始刀，Z = k 终止刀
     //2. 以x = c 为右刀，x = -c 为左刀
     //去切AX+By+Cz +D =0
+    // xz 平面俯视图：
+    //  pc0,pk1    0     pc1,pk1
+    //
+    //
+    //
+    //  pc0,pk0    0     pc1,pk0
+
     if (!mPlaneParams.empty())
     {
-        //cv::Mat mpParams = Twc.m.Inverse()*mPlaneParams;
-        //float paraY0l,paraY0r,paraY1l,paraY1r;
-        //paraY0l = paraY1l = paraY0r = paraY1r = mpParams.at<float>(3);        
-        // Eigen::Vector4d center(0,0,0,1);
-        // cv::Mat Rwc = mCameraPose.rowRange(0,3).colRange(0,3).t();
-        // cv::Mat twc = -Rwc*mCameraPose.rowRange(0,3).col(3);
-        // float pk1 = k + twc.at<float>(2);
-        // float pk0 = twc.at<float>(2);
-        // float pc0 = -c + twc.at<float>(0);
-        // float pc1 = c + twc.at<float>(0);
+
+        //mPlaneParams 转化到第一帧的坐标系。
+        //使用两个点来跟踪平面方程参数M，N
+        cv::Mat fMat = mPlaneParams.clone();
+        float planeN[3] = {0, -fMat.at<float>(3)/fMat.at<float>(1), 0};
+        float planeM[3] = {fMat.at<float>(0), fMat.at<float>(1) - fMat.at<float>(3)/fMat.at<float>(1), fMat.at<float>(2)};
+        cv::Mat N = cv::Mat(3, 1, CV_32F, planeN);
+        cv::Mat M = cv::Mat(3, 1, CV_32F, planeM);
+        cv::Mat fRcw = mCameraPose.rowRange(0,3).colRange(0,3).clone();
+        cv::Mat ftcw = mCameraPose.rowRange(0,3).col(3).clone();
+        cv::Mat M0 = fRcw* (M + ftcw);
+        cv::Mat N0 = fRcw* (N + ftcw); 
+        cv::Mat NM = M0 - N0;
+        float D0 =0 -( NM.at<float>(0)*N0.at<float>(0) + NM.at<float>(1)*N0.at<float>(1) + NM.at<float>(2)*N0.at<float>(2) );
+        float planeParams0[4] = {NM.at<float>(0), NM.at<float>(1), NM.at<float>(2), D0};
+        cv::Mat fMat0 = cv::Mat(4, 1, CV_32F, planeParams0);
+
         float pk0 = 0;
         float pk1 = k;
         float pc0 = -c;
         float pc1 = c;
 
-        float paraY0l = (-mPlaneParams.at<float>(3) - mPlaneParams.at<float>(0)*(pc0) - mPlaneParams.at<float>(2)*pk0) / mPlaneParams.at<float>(1);
-        float paraY0r = (-mPlaneParams.at<float>(3) - mPlaneParams.at<float>(0)*(pc1) - mPlaneParams.at<float>(2)*pk0) / mPlaneParams.at<float>(1);
-        float paraY1l = (-mPlaneParams.at<float>(3) - mPlaneParams.at<float>(0)*(pc0) - mPlaneParams.at<float>(2)*pk1) / mPlaneParams.at<float>(1);
-        float paraY1r = (-mPlaneParams.at<float>(3) - mPlaneParams.at<float>(0)*(pc1) - mPlaneParams.at<float>(2)*pk1) / mPlaneParams.at<float>(1);
+        float paraY0l = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc0) - fMat0.at<float>(2)*pk0) / fMat0.at<float>(1);
+        float paraY0r = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc1) - fMat0.at<float>(2)*pk0) / fMat0.at<float>(1);
+        float paraY1l = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc0) - fMat0.at<float>(2)*pk1) / fMat0.at<float>(1);
+        float paraY1r = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc1) - fMat0.at<float>(2)*pk1) / fMat0.at<float>(1);
         // //printf("the y :%f %f \n",paraY0l,paraY1r);
        //  printf("draw plane paras: %lf  %lf  %lf  %lf\n",mPlaneParams.at<float>(0), mPlaneParams.at<float>(1), mPlaneParams.at<float>(2),mPlaneParams.at<float>(3));
 

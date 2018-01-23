@@ -101,7 +101,7 @@ int main(int argc, char **argv)
             T = tframe-vTimestamps[ni-1];
 
         if(ttrack<T)
-            usleep((T-ttrack)*1e6);
+            usleep((T-ttrack)*3e5);
     }
 
     // Stop all threads

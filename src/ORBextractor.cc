@@ -786,17 +786,17 @@ void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoin
         const int wCell = ceil(width/nCols);
         const int hCell = ceil(height/nRows);
 
-        for(int i=0; i<nRows; i++)
+        for(int i=0; i<nRows; i++) //8
         {
             const float iniY =minBorderY+i*hCell;
-            float maxY = iniY+hCell+6;
+            float maxY = iniY+hCell+6;// 16 + 34 +6
 
             if(iniY>=maxBorderY-3)
                 continue;
             if(maxY>maxBorderY)
                 maxY = maxBorderY;
 
-            for(int j=0; j<nCols; j++)
+            for(int j=0; j<nCols; j++)//16
             {
                 const float iniX =minBorderX+j*wCell;
                 float maxX = iniX+wCell+6;

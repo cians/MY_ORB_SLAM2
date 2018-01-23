@@ -197,7 +197,8 @@ cv::Mat Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat &imRe
     }
 
     mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
-
+    float defaultPlane[4] = {0,1,0, 0.88};
+    mCurrentFrame.mPlaneParams = cv::Mat(4, 1, CV_32F, defaultPlane);
     Track();
 
     return mCurrentFrame.mTcw.clone();
@@ -488,7 +489,62 @@ void Tracking::Track()
     // Store frame pose information to retrieve the complete camera trajectory afterwards.
     if(!mCurrentFrame.mTcw.empty())
     {
-        mpMapDrawer->mPlaneParams = Optimizer::GroundOpimization(&mCurrentFrame,this,mpMapDrawer->mPlaneParams);
+
+        //mPlaneParams 转化到第一帧的坐标系。
+        //使用两个点来跟踪平面方程参数N,M
+        //第一个N是在该平面上的，第二个点M在第一个点的“正上方”，这个方向是平面的法向量。
+        cv::Mat fMat = mCurrentFrame.mPlaneParams.clone();
+        float planeN[3] = {0, -fMat.at<float>(3)/fMat.at<float>(1), 0};
+        float planeM[3] = {fMat.at<float>(0), fMat.at<float>(1) - fMat.at<float>(3)/fMat.at<float>(1), fMat.at<float>(2)};
+        cv::Mat N = cv::Mat(3, 1, CV_32F, planeN);
+        cv::Mat M = cv::Mat(3, 1, CV_32F, planeM);
+        //由 M = fRwc *M0 + ftwc 求 M0：
+        cv::Mat fRcw = mCurrentFrame.mTcw.rowRange(0,3).colRange(0,3).clone();
+        cv::Mat ftcw = mCurrentFrame.mTcw.rowRange(0,3).col(3).clone();
+        cv::Mat M0 = fRcw* (M + ftcw);
+        cv::Mat N0 = fRcw* (N + ftcw); 
+        cv::Mat NM = M0 - N0;
+        float D0 =0 -( NM.at<float>(0)*N0.at<float>(0) + NM.at<float>(1)*N0.at<float>(1) + NM.at<float>(2)*N0.at<float>(2) );
+        float planeParams0[4] = {NM.at<float>(0), NM.at<float>(1), NM.at<float>(2), D0};
+        cv::Mat fMat0 = cv::Mat(4, 1, CV_32F, planeParams0); //对应在第一帧的坐标系的平面方程。
+        // xz 平面俯视图：
+        //  pc0,pk1    0     pc1,pk1
+        //
+        //
+        //
+        //  pc0,pk0    0     pc1,pk0
+        float pk0 = 0;
+        float pk1 = 20*mpMapDrawer->mCameraSize;
+        float pc0 = -4*mpMapDrawer->mCameraSize;
+        float pc1 = 4*mpMapDrawer->mCameraSize;
+        float paraY0l = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc0) - fMat0.at<float>(2)*pk0) / fMat0.at<float>(1);
+        float paraY0r = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc1) - fMat0.at<float>(2)*pk0) / fMat0.at<float>(1);
+        float paraY1l = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc0) - fMat0.at<float>(2)*pk1) / fMat0.at<float>(1);
+        float paraY1r = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc1) - fMat0.at<float>(2)*pk1) / fMat0.at<float>(1);
+        // 统一变换到当前帧坐标系。
+        cv::Mat fpose = mCurrentFrame.mTcw.inv();//Twc
+        Eigen::Vector3d p00(pc0,paraY0l,pk0);
+        Eigen::Vector3d p10(pc1,paraY0r,pk0);
+        Eigen::Vector3d p01(pc0,paraY0l,pk1);
+        Eigen::Vector3d p11(pc1,paraY0r,pk1);
+        
+        cv::Mat fp00 = fpose.rowRange(0,3).colRange(0,3) * Converter::toCvMat(p00) + fpose.rowRange(0,3).col(3);
+        cv::Mat fp01 = fpose.rowRange(0,3).colRange(0,3) * Converter::toCvMat(p01) + fpose.rowRange(0,3).col(3);
+        cv::Mat fp10 = fpose.rowRange(0,3).colRange(0,3) * Converter::toCvMat(p10) + fpose.rowRange(0,3).col(3);
+        cv::Mat fp11 = fpose.rowRange(0,3).colRange(0,3) * Converter::toCvMat(p11) + fpose.rowRange(0,3).col(3);
+        //cam_project 得到图像上的齐次坐标
+        cv::Mat fp00_p2 = mK * fp00;
+        cv::Mat fp01_p2 = mK * fp01;
+        cv::Mat fp10_p2 = mK * fp10;
+        cv::Mat fp11_p2 = mK * fp11;
+
+        float result_4_points[8] = {fp00_p2.at<float>(0)/fp00_p2.at<float>(2), fp00_p2.at<float>(1)/fp00_p2.at<float>(2),
+                                    fp01_p2.at<float>(0)/fp01_p2.at<float>(2), fp01_p2.at<float>(1)/fp01_p2.at<float>(2),
+                                    fp10_p2.at<float>(0)/fp10_p2.at<float>(2), fp10_p2.at<float>(1)/fp10_p2.at<float>(2),
+                                    fp11_p2.at<float>(0)/fp11_p2.at<float>(2), fp11_p2.at<float>(1)/fp11_p2.at<float>(2)};
+        //得到梯形4顶点传给FrameDrawer
+        mpFrameDrawer->mPloygonParams = cv::Mat(4,2,CV_32F,result_4_points);
+        mpMapDrawer->mPlaneParams = mCurrentFrame.mPlaneParams;
         cv::Mat Tcr = mCurrentFrame.mTcw*mCurrentFrame.mpReferenceKF->GetPoseInverse();
         mlRelativeFramePoses.push_back(Tcr);
         mlpReferences.push_back(mpReferenceKF);
@@ -765,7 +821,7 @@ bool Tracking::TrackReferenceKeyFrame()
     // If enough matches are found we setup a PnP solver
     ORBmatcher matcher(0.7,true);
     vector<MapPoint*> vpMapPointMatches;
-
+    
     int nmatches = matcher.SearchByBoW(mpReferenceKF,mCurrentFrame,vpMapPointMatches);
 
     if(nmatches<15)

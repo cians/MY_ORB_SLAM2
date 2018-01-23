@@ -48,13 +48,13 @@ public:
 
    // double mPlaneParams;
     cv::Mat mPlaneParams;
+    float mCameraSize;
 private:
 
     float mKeyFrameSize;
     float mKeyFrameLineWidth;
     float mGraphLineWidth;
     float mPointSize;
-    float mCameraSize;
     float mCameraLineWidth;
 
     cv::Mat mCameraPose;
