@@ -507,7 +507,7 @@ void Tracking::Track()
         float D0 =0 -( NM.at<float>(0)*N0.at<float>(0) + NM.at<float>(1)*N0.at<float>(1) + NM.at<float>(2)*N0.at<float>(2) );
         float planeParams0[4] = {NM.at<float>(0), NM.at<float>(1), NM.at<float>(2), D0};
         cv::Mat fMat0 = cv::Mat(4, 1, CV_32F, planeParams0); //对应在第一帧的坐标系的平面方程。
-        // xz 平面俯视图：
+        // xz 平面俯视图：宽度：pc； 长度：pk
         //  pc0,pk1    0     pc1,pk1
         //
         //
@@ -515,8 +515,8 @@ void Tracking::Track()
         //  pc0,pk0    0     pc1,pk0
         float pk0 = 0;
         float pk1 = 20*mpMapDrawer->mCameraSize;
-        float pc0 = -4*mpMapDrawer->mCameraSize;
-        float pc1 = 4*mpMapDrawer->mCameraSize;
+        float pc0 = -3*mpMapDrawer->mCameraSize;
+        float pc1 = 3*mpMapDrawer->mCameraSize;
         float paraY0l = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc0) - fMat0.at<float>(2)*pk0) / fMat0.at<float>(1);
         float paraY0r = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc1) - fMat0.at<float>(2)*pk0) / fMat0.at<float>(1);
         float paraY1l = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc0) - fMat0.at<float>(2)*pk1) / fMat0.at<float>(1);
@@ -542,6 +542,7 @@ void Tracking::Track()
                                     fp01_p2.at<float>(0)/fp01_p2.at<float>(2), fp01_p2.at<float>(1)/fp01_p2.at<float>(2),
                                     fp10_p2.at<float>(0)/fp10_p2.at<float>(2), fp10_p2.at<float>(1)/fp10_p2.at<float>(2),
                                     fp11_p2.at<float>(0)/fp11_p2.at<float>(2), fp11_p2.at<float>(1)/fp11_p2.at<float>(2)};
+        //得到的图像的点可能投影回来越界了，尤其是p00，p01,在FrameDrawer中处理。                              
         //得到梯形4顶点传给FrameDrawer
         mpFrameDrawer->mPloygonParams = cv::Mat(4,2,CV_32F,result_4_points);
         mpMapDrawer->mPlaneParams = mCurrentFrame.mPlaneParams;
@@ -595,7 +596,7 @@ void Tracking::StereoInitialization()
             }
         }
 
-        cout << "New map created with " << mpMap->MapPointsInMap() << " points" << endl;
+        cout << "KeyPoints :"<<mCurrentFrame.N<<"   New map created with " << mpMap->MapPointsInMap() << " points" << endl;
 
         mpLocalMapper->InsertKeyFrame(pKFini);
 

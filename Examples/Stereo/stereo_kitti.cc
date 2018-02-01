@@ -62,7 +62,7 @@ int main(int argc, char **argv)
     cout << endl << "-------" << endl;
     cout << "Start processing sequence ..." << endl;
     cout << "Images in the sequence: " << nImages << endl << endl;   
-
+   
     // Main loop
     cv::Mat imLeft, imRight;
     for(int ni=0; ni<nImages; ni++)
@@ -89,9 +89,9 @@ int main(int argc, char **argv)
         // cv::GaussianBlur(imRight, imRight, cv::Size(1, 1), 0, 0);
         //  cv::imshow("left",imLeft);
         //  cv::imshow("right",imRight);
-        //  cv::waitKey();
         // Pass the images to the SLAM system
         SLAM.TrackStereo(imLeft,imRight,tframe);
+        cout<< "Frame:  "<< ni<< endl;
 
 #ifdef COMPILEDWITHC11
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();

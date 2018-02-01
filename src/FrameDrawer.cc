@@ -41,7 +41,7 @@ cv::Mat FrameDrawer::DrawFrame()
     vector<cv::KeyPoint> vIniKeys; // Initialization: KeyPoints in reference frame
     vector<int> vMatches; // Initialization: correspondeces with reference keypoints
     vector<cv::KeyPoint> vCurrentKeys; // KeyPoints in current frame
-    vector<bool> vbVO, vbMap; // Tracked MapPoints in current frame
+    vector<bool> vbVO, vbMap,vgMap; // Tracked MapPoints in current frame
     int state; // Tracking state
 
     //Copy variables within scoped mutex
@@ -64,6 +64,7 @@ cv::Mat FrameDrawer::DrawFrame()
             vCurrentKeys = mvCurrentKeys;
             vbVO = mvbVO;
             vbMap = mvbMap;
+            vgMap = mvgMap;
         }
         else if(mState==Tracking::LOST)
         {
@@ -75,25 +76,26 @@ cv::Mat FrameDrawer::DrawFrame()
         cvtColor(im,im,CV_GRAY2BGR);
 
     //Draw a possible plane area ;
-    //    c11  c12
-    // c21         c22
+    //    c01  c11
+    // c00         c10
+    //      p01  p11
+    // p00           p10
     MapInPlaneNum = 0;
-    // cv::Point2f c11(200,700);
-    // cv::Point2f c12(1620,700);
-    // cv::Point2f c22(1847,1078);
-    // cv::Point2f c21(0,1078);
-    // cv::Point2f c11(40,210);
-    // cv::Point2f c12(420,210);
-    // cv::Point2f c22(520,290);
-    // cv::Point2f c21(0,290);
-    cv::Point2f c11(mPloygonParams.at<float>(0,0),mPloygonParams.at<float>(0,1));
-    cv::Point2f c12(mPloygonParams.at<float>(1,0),mPloygonParams.at<float>(1,1));
-    cv::Point2f c21(mPloygonParams.at<float>(2,0),mPloygonParams.at<float>(2,1));
-    cv::Point2f c22(mPloygonParams.at<float>(3,0),mPloygonParams.at<float>(3,1));
-    cv::line(im,c11,c12,cv::Scalar(0,0,255));
-    cv::line(im,c21,c22,cv::Scalar(0,0,255));
-    cv::line(im,c11,c21,cv::Scalar(0,0,255));
-    cv::line(im,c12,c22,cv::Scalar(0,0,255));
+    // 依次是p00  01  10  11
+    cv::Point2f c00(mPloygonParams.at<float>(0,0), mPloygonParams.at<float>(0,1));
+    cv::Point2f c01(mPloygonParams.at<float>(1,0), mPloygonParams.at<float>(1,1));
+    cv::Point2f c10(mPloygonParams.at<float>(2,0), mPloygonParams.at<float>(2,1));
+    cv::Point2f c11(mPloygonParams.at<float>(3,0), mPloygonParams.at<float>(3,1));
+    //00 和 10通常开始时是越界的。拉回来
+    c00.x = ( c00.x<0 || c00.x > im.cols) ? 0 : c00.x ;
+    c00.y = ( c00.y<0 || c00.y > im.rows) ? im.rows : c00.y ;        
+    c10.x = ( c10.x<0 || c10.x > im.cols) ? im.cols : c10.x ;
+    c10.y = ( c10.y<0 || c10.y > im.rows) ? im.rows : c10.y ; 
+
+    cv::line(im,c00,c10,cv::Scalar(0,0,255));
+    cv::line(im,c00,c01,cv::Scalar(0,0,255));
+    cv::line(im,c10,c11,cv::Scalar(0,0,255));
+    cv::line(im,c01,c11,cv::Scalar(0,0,255));
     //Draw
     if(state==Tracking::NOT_INITIALIZED) //INITIALIZING
     {
@@ -126,6 +128,10 @@ cv::Mat FrameDrawer::DrawFrame()
                 // This is a match to a MapPoint in the map
                 if(vbMap[i])
                 {
+                    if (vgMap[i])
+                        vColor = cv::Scalar(0,0,255);
+                    else
+                        vColor = cv::Scalar(0,255,0);
                     cv::rectangle(im,pt1,pt2,vColor);
                     cv::circle(im,vCurrentKeys[i].pt,2,vColor,-1);
                     mnTracked++;
@@ -142,6 +148,8 @@ cv::Mat FrameDrawer::DrawFrame()
 
     cv::Mat imWithInfo;
     DrawTextInfo(im,state, imWithInfo);
+
+    cv::resize(imWithInfo,imWithInfo,cv::Size(960,780));
 
     return imWithInfo;
 }
@@ -193,6 +201,7 @@ void FrameDrawer::Update(Tracking *pTracker)
     N = mvCurrentKeys.size();
     mvbVO = vector<bool>(N,false);
     mvbMap = vector<bool>(N,false);
+    mvgMap = vector<bool>(N,false);
     mbOnlyTracking = pTracker->mbOnlyTracking;
 
 
@@ -208,6 +217,8 @@ void FrameDrawer::Update(Tracking *pTracker)
             MapPoint* pMP = pTracker->mCurrentFrame.mvpMapPoints[i];
             if(pMP)
             {
+                if (pMP->isGround)
+                    mvgMap[i]=true;
                 if(!pTracker->mCurrentFrame.mvbOutlier[i])
                 {
                     if(pMP->Observations()>0)

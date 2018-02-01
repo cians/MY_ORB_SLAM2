@@ -318,14 +318,14 @@ int Optimizer::PoseOptimization(Frame *pFrame)
         if(pMP && pKP && !pMP->isBad())
         {
 
-            // cv::Point2f c11(200,700);
-            // cv::Point2f c12(1620,700);
-            // cv::Point2f c22(1847,1078);
-            // cv::Point2f c21(0,1078);
-            cv::Point2f c11(40,210);
-            cv::Point2f c12(420,210);
-            cv::Point2f c22(520,290);
-            cv::Point2f c21(0,290);
+            cv::Point2f c11(200,700);
+            cv::Point2f c12(1620,700);
+            cv::Point2f c22(1846,1077);
+            cv::Point2f c21(1,1077);
+            // cv::Point2f c11(40,210);
+            // cv::Point2f c12(420,210);
+            // cv::Point2f c22(520,290);
+            // cv::Point2f c21(0,290);
             if(pKP->pt.x > c21.x && pKP->pt.y > c11.y && pKP->pt.x < c22.x && pKP->pt.y < c22.y)
             {
                 float xly = (c21.x-c11.x)/(c21.y-c11.y);//负数

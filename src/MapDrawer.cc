@@ -79,11 +79,11 @@ void MapDrawer::DrawMapPoints()
         if((*sit)->isGround)
         {
             glPointSize(mPointSize+1);
-            glColor3ub(124,252,0);
+            glColor3f(1.0,0.0,0.0);
         }
         else
         {
-            glColor3f(1.0,0.0,0.0);
+            glColor3f(0.0,1.0,0.0);
             glPointSize(mPointSize);
         }
         cv::Mat pos = (*sit)->GetWorldPos();
@@ -248,18 +248,18 @@ void MapDrawer::DrawGroundPlane(pangolin::OpenGlMatrix &Twc)
 #endif
     glLineWidth(mCameraLineWidth);
     
-    glColor4ub(255,255,0,105);
-    glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
-    glBegin(GL_TRIANGLES);
-    glVertex3f(-c,y,0);
-    glVertex3f(-c,y,k);
-    glVertex3f(c,y,0);
+    // draw yellow as pseudo groundtruth
+    // glColor4ub(255,255,0,105);
+    // glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
+    // glBegin(GL_TRIANGLES);
+    // glVertex3f(-c,y,0);
+    // glVertex3f(-c,y,k);
+    // glVertex3f(c,y,0);
     
-    glVertex3f(-c,y,k);
-    glVertex3f(c,y,k);
-    glVertex3f(c,y,0);
-
-    glEnd();
+    // glVertex3f(-c,y,k);
+    // glVertex3f(c,y,k);
+    // glVertex3f(c,y,0);
+    // glEnd();
    // glPopMatrix();
     
     //1. 以Z = 0 起始刀，Z = k 终止刀
