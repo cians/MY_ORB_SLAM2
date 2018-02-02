@@ -33,6 +33,7 @@ FrameDrawer::FrameDrawer(Map* pMap):mpMap(pMap)
 {
     mState=Tracking::SYSTEM_NOT_READY;
     mIm = cv::Mat(480,640,CV_8UC3, cv::Scalar(0,0,0));
+    mPloygonParams = cv::Mat(4,2,CV_32F);
 }
 
 cv::Mat FrameDrawer::DrawFrame()
@@ -43,10 +44,15 @@ cv::Mat FrameDrawer::DrawFrame()
     vector<cv::KeyPoint> vCurrentKeys; // KeyPoints in current frame
     vector<bool> vbVO, vbMap,vgMap; // Tracked MapPoints in current frame
     int state; // Tracking state
+    cv::Point2f c00,c01,c10,c11;
 
     //Copy variables within scoped mutex
     {
         unique_lock<mutex> lock(mMutex);
+        c00 = cv::Point2f(mPloygonParams.at<float>(0,0), mPloygonParams.at<float>(0,1));
+        c01 = cv::Point2f(mPloygonParams.at<float>(1,0), mPloygonParams.at<float>(1,1));
+        c10 = cv::Point2f(mPloygonParams.at<float>(2,0), mPloygonParams.at<float>(2,1));
+        c11 = cv::Point2f(mPloygonParams.at<float>(3,0), mPloygonParams.at<float>(3,1));
         state=mState;
         if(mState==Tracking::SYSTEM_NOT_READY)
             mState=Tracking::NO_IMAGES_YET;
@@ -82,10 +88,6 @@ cv::Mat FrameDrawer::DrawFrame()
     // p00           p10
     MapInPlaneNum = 0;
     // 依次是p00  01  10  11
-    cv::Point2f c00(mPloygonParams.at<float>(0,0), mPloygonParams.at<float>(0,1));
-    cv::Point2f c01(mPloygonParams.at<float>(1,0), mPloygonParams.at<float>(1,1));
-    cv::Point2f c10(mPloygonParams.at<float>(2,0), mPloygonParams.at<float>(2,1));
-    cv::Point2f c11(mPloygonParams.at<float>(3,0), mPloygonParams.at<float>(3,1));
     //00 和 10通常开始时是越界的。拉回来
     c00.x = ( c00.x<0 || c00.x > im.cols) ? 0 : c00.x ;
     c00.y = ( c00.y<0 || c00.y > im.rows) ? im.rows : c00.y ;        
@@ -203,7 +205,7 @@ void FrameDrawer::Update(Tracking *pTracker)
     mvbMap = vector<bool>(N,false);
     mvgMap = vector<bool>(N,false);
     mbOnlyTracking = pTracker->mbOnlyTracking;
-
+    mPloygonParams = pTracker->mPloygonParams;
 
     if(pTracker->mLastProcessedState==Tracking::NOT_INITIALIZED)
     {

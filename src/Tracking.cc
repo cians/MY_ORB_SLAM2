@@ -49,6 +49,8 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpMap(pMap), mnLastRelocFrameId(0)
 {
     // Load camera parameters from settings file
+    mPloygonParams = cv::Mat(4,2, CV_32F);
+    mpGroundMap = new Map();
 
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
     float fx = fSettings["Camera.fx"];
@@ -56,6 +58,10 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     float cx = fSettings["Camera.cx"];
     float cy = fSettings["Camera.cy"];
 
+    mImgWidth = fSettings["Camera.width"];
+    mImgHeight = fSettings["Camera.height"];
+    mCameraSize = fSettings["Viewer.CameraSize"];
+    
     cv::Mat K = cv::Mat::eye(3,3,CV_32F);
     K.at<float>(0,0) = fx;
     K.at<float>(1,1) = fy;
@@ -197,7 +203,7 @@ cv::Mat Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat &imRe
     }
 
     mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
-    float defaultPlane[4] = {0,1,0, 0.88};
+    float defaultPlane[4] = {0,1,0, -0.88};
     mCurrentFrame.mPlaneParams = cv::Mat(4, 1, CV_32F, defaultPlane);
     Track();
 
@@ -416,6 +422,63 @@ void Tracking::Track()
             mState=LOST;
 
         // Update drawer
+
+        //mPlaneParams 转化到第一帧的坐标系。
+        //使用两个点来跟踪平面方程参数N,M
+        //第一个N是在该平面上的，第二个点M在第一个点的“正上方”，这个方向是平面的法向量。
+        cv::Mat fMat = mCurrentFrame.mPlaneParams.clone();
+        float planeN[3] = {0, -fMat.at<float>(3)/fMat.at<float>(1), 0};
+        float planeM[3] = {fMat.at<float>(0), fMat.at<float>(1) - fMat.at<float>(3)/fMat.at<float>(1), fMat.at<float>(2)};
+        cv::Mat N = cv::Mat(3, 1, CV_32F, planeN);
+        cv::Mat M = cv::Mat(3, 1, CV_32F, planeM);
+        //由 M = fRwc *M0 + ftwc 求 M0：
+        cv::Mat fRcw = mCurrentFrame.mTcw.rowRange(0,3).colRange(0,3).clone();
+        cv::Mat ftcw = mCurrentFrame.mTcw.rowRange(0,3).col(3).clone();
+        cv::Mat M0 = fRcw* (M + ftcw);
+        cv::Mat N0 = fRcw* (N + ftcw); 
+        cv::Mat NM = M0 - N0;
+        float D0 =0 -( NM.at<float>(0)*N0.at<float>(0) + NM.at<float>(1)*N0.at<float>(1) + NM.at<float>(2)*N0.at<float>(2) );
+        float planeParams0[4] = {NM.at<float>(0), NM.at<float>(1), NM.at<float>(2), D0};
+        cv::Mat fMat0 = cv::Mat(4, 1, CV_32F, planeParams0); //对应在第一帧的坐标系的平面方程。
+        // xz 平面俯视图：宽度：pc； 长度：pk
+        //  pc0,pk1    0     pc1,pk1
+        //
+        //
+        //
+        //  pc0,pk0    0     pc1,pk0
+        float pk0 = 0;
+        float pk1 = 20*mCameraSize;//lock??
+        float pc0 = -3*mCameraSize;
+        float pc1 = 3*mCameraSize;
+        float paraY0l = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc0) - fMat0.at<float>(2)*pk0) / fMat0.at<float>(1);
+        float paraY0r = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc1) - fMat0.at<float>(2)*pk0) / fMat0.at<float>(1);
+        float paraY1l = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc0) - fMat0.at<float>(2)*pk1) / fMat0.at<float>(1);
+        float paraY1r = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc1) - fMat0.at<float>(2)*pk1) / fMat0.at<float>(1);
+        // 统一变换到当前帧坐标系。
+        cv::Mat fpose = mCurrentFrame.mTcw.inv();//Twc
+        Eigen::Vector3d p00(pc0,paraY0l,pk0);
+        Eigen::Vector3d p10(pc1,paraY0r,pk0);
+        Eigen::Vector3d p01(pc0,paraY1l,pk1);
+        Eigen::Vector3d p11(pc1,paraY1r,pk1);
+        
+        cv::Mat fp00 = fpose.rowRange(0,3).colRange(0,3) * Converter::toCvMat(p00) + fpose.rowRange(0,3).col(3);
+        cv::Mat fp01 = fpose.rowRange(0,3).colRange(0,3) * Converter::toCvMat(p01) + fpose.rowRange(0,3).col(3);
+        cv::Mat fp10 = fpose.rowRange(0,3).colRange(0,3) * Converter::toCvMat(p10) + fpose.rowRange(0,3).col(3);
+        cv::Mat fp11 = fpose.rowRange(0,3).colRange(0,3) * Converter::toCvMat(p11) + fpose.rowRange(0,3).col(3);
+        //cam_project 得到图像上的齐次坐标
+        cv::Mat fp00_p2 = mK * fp00;
+        cv::Mat fp01_p2 = mK * fp01;
+        cv::Mat fp10_p2 = mK * fp10;
+        cv::Mat fp11_p2 = mK * fp11;
+
+        float result_4_points[8] = {fp00_p2.at<float>(0)/fp00_p2.at<float>(2), fp00_p2.at<float>(1)/fp00_p2.at<float>(2),
+                                    fp01_p2.at<float>(0)/fp01_p2.at<float>(2), fp01_p2.at<float>(1)/fp01_p2.at<float>(2),
+                                    fp10_p2.at<float>(0)/fp10_p2.at<float>(2), fp10_p2.at<float>(1)/fp10_p2.at<float>(2),
+                                    fp11_p2.at<float>(0)/fp11_p2.at<float>(2), fp11_p2.at<float>(1)/fp11_p2.at<float>(2)};
+        //得到的图像的点可能投影回来越界了，尤其是p00，p01,在FrameDrawer中处理。                              
+        //得到梯形4顶点传给FrameDrawer
+        mPloygonParams = cv::Mat(4,2,CV_32F,result_4_points);
+       // cout<<mPloygonParams;
         mpFrameDrawer->Update(this);
 
         // If tracking were good, check if we insert a keyframe
@@ -433,6 +496,7 @@ void Tracking::Track()
                 mVelocity = cv::Mat();
 
             mpMapDrawer->SetCurrentCameraPose(mCurrentFrame.mTcw);
+            mpMapDrawer->SetCurrentPlaneParams(mCurrentFrame.mPlaneParams);
         
             // Clean VO matches
             for(int i=0; i<mCurrentFrame.N; i++)
@@ -489,63 +553,6 @@ void Tracking::Track()
     // Store frame pose information to retrieve the complete camera trajectory afterwards.
     if(!mCurrentFrame.mTcw.empty())
     {
-
-        //mPlaneParams 转化到第一帧的坐标系。
-        //使用两个点来跟踪平面方程参数N,M
-        //第一个N是在该平面上的，第二个点M在第一个点的“正上方”，这个方向是平面的法向量。
-        cv::Mat fMat = mCurrentFrame.mPlaneParams.clone();
-        float planeN[3] = {0, -fMat.at<float>(3)/fMat.at<float>(1), 0};
-        float planeM[3] = {fMat.at<float>(0), fMat.at<float>(1) - fMat.at<float>(3)/fMat.at<float>(1), fMat.at<float>(2)};
-        cv::Mat N = cv::Mat(3, 1, CV_32F, planeN);
-        cv::Mat M = cv::Mat(3, 1, CV_32F, planeM);
-        //由 M = fRwc *M0 + ftwc 求 M0：
-        cv::Mat fRcw = mCurrentFrame.mTcw.rowRange(0,3).colRange(0,3).clone();
-        cv::Mat ftcw = mCurrentFrame.mTcw.rowRange(0,3).col(3).clone();
-        cv::Mat M0 = fRcw* (M + ftcw);
-        cv::Mat N0 = fRcw* (N + ftcw); 
-        cv::Mat NM = M0 - N0;
-        float D0 =0 -( NM.at<float>(0)*N0.at<float>(0) + NM.at<float>(1)*N0.at<float>(1) + NM.at<float>(2)*N0.at<float>(2) );
-        float planeParams0[4] = {NM.at<float>(0), NM.at<float>(1), NM.at<float>(2), D0};
-        cv::Mat fMat0 = cv::Mat(4, 1, CV_32F, planeParams0); //对应在第一帧的坐标系的平面方程。
-        // xz 平面俯视图：宽度：pc； 长度：pk
-        //  pc0,pk1    0     pc1,pk1
-        //
-        //
-        //
-        //  pc0,pk0    0     pc1,pk0
-        float pk0 = 0;
-        float pk1 = 20*mpMapDrawer->mCameraSize;
-        float pc0 = -3*mpMapDrawer->mCameraSize;
-        float pc1 = 3*mpMapDrawer->mCameraSize;
-        float paraY0l = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc0) - fMat0.at<float>(2)*pk0) / fMat0.at<float>(1);
-        float paraY0r = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc1) - fMat0.at<float>(2)*pk0) / fMat0.at<float>(1);
-        float paraY1l = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc0) - fMat0.at<float>(2)*pk1) / fMat0.at<float>(1);
-        float paraY1r = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc1) - fMat0.at<float>(2)*pk1) / fMat0.at<float>(1);
-        // 统一变换到当前帧坐标系。
-        cv::Mat fpose = mCurrentFrame.mTcw.inv();//Twc
-        Eigen::Vector3d p00(pc0,paraY0l,pk0);
-        Eigen::Vector3d p10(pc1,paraY0r,pk0);
-        Eigen::Vector3d p01(pc0,paraY0l,pk1);
-        Eigen::Vector3d p11(pc1,paraY0r,pk1);
-        
-        cv::Mat fp00 = fpose.rowRange(0,3).colRange(0,3) * Converter::toCvMat(p00) + fpose.rowRange(0,3).col(3);
-        cv::Mat fp01 = fpose.rowRange(0,3).colRange(0,3) * Converter::toCvMat(p01) + fpose.rowRange(0,3).col(3);
-        cv::Mat fp10 = fpose.rowRange(0,3).colRange(0,3) * Converter::toCvMat(p10) + fpose.rowRange(0,3).col(3);
-        cv::Mat fp11 = fpose.rowRange(0,3).colRange(0,3) * Converter::toCvMat(p11) + fpose.rowRange(0,3).col(3);
-        //cam_project 得到图像上的齐次坐标
-        cv::Mat fp00_p2 = mK * fp00;
-        cv::Mat fp01_p2 = mK * fp01;
-        cv::Mat fp10_p2 = mK * fp10;
-        cv::Mat fp11_p2 = mK * fp11;
-
-        float result_4_points[8] = {fp00_p2.at<float>(0)/fp00_p2.at<float>(2), fp00_p2.at<float>(1)/fp00_p2.at<float>(2),
-                                    fp01_p2.at<float>(0)/fp01_p2.at<float>(2), fp01_p2.at<float>(1)/fp01_p2.at<float>(2),
-                                    fp10_p2.at<float>(0)/fp10_p2.at<float>(2), fp10_p2.at<float>(1)/fp10_p2.at<float>(2),
-                                    fp11_p2.at<float>(0)/fp11_p2.at<float>(2), fp11_p2.at<float>(1)/fp11_p2.at<float>(2)};
-        //得到的图像的点可能投影回来越界了，尤其是p00，p01,在FrameDrawer中处理。                              
-        //得到梯形4顶点传给FrameDrawer
-        mpFrameDrawer->mPloygonParams = cv::Mat(4,2,CV_32F,result_4_points);
-        mpMapDrawer->mPlaneParams = mCurrentFrame.mPlaneParams;
         cv::Mat Tcr = mCurrentFrame.mTcw*mCurrentFrame.mpReferenceKF->GetPoseInverse();
         mlRelativeFramePoses.push_back(Tcr);
         mlpReferences.push_back(mpReferenceKF);
@@ -812,6 +819,77 @@ void Tracking::CheckReplacedInLastFrame()
     }
 }
 
+void Tracking::UpdateGroundMap()
+{
+    unique_lock<mutex> lock(mpGroundMap->mMutexMapUpdate);
+    //save the Ground Map points in front of camera and is less 5 frame away from CurrentFrame, else erase it
+    vector<MapPoint*> ransac_datas;
+    //ransac_datas.reserve(nExpectedSize);
+    if (mpGroundMap->MapPointsInMap() > 0)
+    {
+       vector<MapPoint*> vpgMP = mpGroundMap->GetAllMapPoints();
+      // cout<<"GroundMap points nums:"<<vpgMP.size()<<endl;
+       for (auto pgMP : vpgMP)
+       {
+           if (pgMP && !pgMP->isBad() && pgMP->isGround && pgMP->mnFirstFrame > 0 
+                                      && abs(int(pgMP->mnFirstFrame - mCurrentFrame.mnId)) < 5)
+            {
+                ransac_datas.push_back(pgMP);                
+            }
+            else
+                mpGroundMap->EraseMapPoint(pgMP);
+       } 
+    }
+    printf("get %d mappoints in history. but CurrentFrame Mappoints: %d \n", int(ransac_datas.size()), mCurrentFrame.N);
+    for(int i=0; i<mCurrentFrame.N; i++)
+    {
+        cv::KeyPoint* pKP = &mCurrentFrame.mvKeys[i];
+        MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
+        if(pMP && pKP && !pMP->isBad())
+        {
+
+            cv::Point2f c11(0.12*mImgWidth, 0.7*mImgHeight);
+            cv::Point2f c12(0.88*mImgWidth, 0.7*mImgHeight);
+            cv::Point2f c22(mImgWidth,mImgHeight);
+            cv::Point2f c21(0,mImgHeight);
+            if(pKP->pt.x > c21.x && pKP->pt.y > c11.y && pKP->pt.x < c22.x && pKP->pt.y < c22.y)
+            {
+                float xly = (c21.x-c11.x)/(c21.y-c11.y);//负数
+                float xry = (c22.x-c12.x)/(c22.y-c12.y);//x|y 是为了防止90°斜率不存在
+                float dxl = pKP->pt.x - c11.x;
+                float dyl = pKP->pt.y - c11.y;
+                float dxr = pKP->pt.x - c12.x;
+                float dyr = pKP->pt.y - c12.y;
+                if(dxl/dyl > xly && dxr/dyr < xry)
+                    {
+                        //进入这里的是地面候选map点。通过ransac得到的inliners才是真正的map points
+                        ransac_datas.push_back(pMP);
+                    }
+            }
+        }
+    }
+    double outPlaneD = 0;
+    double distanceThreshold = 0.1;
+    Eigen::Vector4d _vp = Converter::toVector4d(mCurrentFrame.mPlaneParams);
+    Ransac ransacPlaned;
+    ransacPlaned.RansacFitPlaneD(ransac_datas, ransac_datas.size(), _vp.segment(0,3), distanceThreshold, outPlaneD);
+    // set ransac inliners isGround and add it to GroundMap
+    for (size_t i = 0; i < ransac_datas.size(); ++i)
+    {
+        Eigen::Vector3d Data_ie = Converter::toVector3d(ransac_datas[i]->GetWorldPos());
+        double dist = Data_ie(0) * _vp(0) +Data_ie(1) * _vp(1) + Data_ie(2) * _vp(2) + outPlaneD; // fit 函数
+        if (abs(dist) < distanceThreshold)
+        {
+            // printf( GREEN " ==%7lf==" NONE,dist);
+            ransac_datas[i]->isGround = true;
+            mpGroundMap->AddMapPoint(ransac_datas[i]);
+        }
+        else
+            ransac_datas[i]->isGround = false;
+    }
+    printf("Ransac result plane d: %lf ,and MapPoints in GroundMap : %d \n", outPlaneD, int(mpGroundMap->MapPointsInMap()));
+    
+}
 
 bool Tracking::TrackReferenceKeyFrame()
 {
@@ -830,6 +908,9 @@ bool Tracking::TrackReferenceKeyFrame()
 
     mCurrentFrame.mvpMapPoints = vpMapPointMatches;
     mCurrentFrame.SetPose(mLastFrame.mTcw);
+
+    // update GroundMap points
+    UpdateGroundMap();
 
     Optimizer::PoseOptimization(&mCurrentFrame);
 
@@ -953,6 +1034,8 @@ bool Tracking::TrackWithMotionModel()
     if(nmatches<20)
         return false;
 
+    // update GroundMap points
+    UpdateGroundMap();
     // Optimize frame pose with all matches
     Optimizer::PoseOptimization(&mCurrentFrame);
 
@@ -1495,6 +1578,8 @@ bool Tracking::Relocalization()
                     else
                         mCurrentFrame.mvpMapPoints[j]=NULL;
                 }
+                // update GroundMap points
+                UpdateGroundMap();
 
                 int nGood = Optimizer::PoseOptimization(&mCurrentFrame);
 

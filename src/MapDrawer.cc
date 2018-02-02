@@ -237,7 +237,7 @@ void MapDrawer::DrawGroundPlane(pangolin::OpenGlMatrix &Twc)
     const float &w = mCameraSize;
     const float c = w*3;//横向
     const float k = w*15;//前进向
-    const float y = 1;
+  //  const float y = 1;
 
     glPushMatrix();
 
@@ -324,6 +324,12 @@ void MapDrawer::SetCurrentCameraPose(const cv::Mat &Tcw)
 {
     unique_lock<mutex> lock(mMutexCamera);
     mCameraPose = Tcw.clone();
+}
+
+void MapDrawer::SetCurrentPlaneParams(const cv::Mat &m)
+{
+    unique_lock<mutex> lock(mMutexCamera);
+    mPlaneParams = m.clone();
 }
 
 void MapDrawer::GetCurrentOpenGLCameraMatrix(pangolin::OpenGlMatrix &M)

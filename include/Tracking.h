@@ -103,6 +103,9 @@ public:
     std::vector<cv::Point3f> mvIniP3D;
     Frame mInitialFrame;
 
+    //FrameDrawer paras
+    cv::Mat mPloygonParams;
+
     // Lists used to recover the full camera trajectory at the end of the execution.
     // Basically we store the reference keyframe for each frame and its relative transformation
     //KeyFrame stored like【00011112222333】
@@ -130,6 +133,7 @@ protected:
     void CreateInitialMapMonocular();
 
     void CheckReplacedInLastFrame();
+    void UpdateGroundMap();
     bool TrackReferenceKeyFrame();
     void UpdateLastFrame();
     bool TrackWithMotionModel();
@@ -182,11 +186,13 @@ protected:
 
     //Map
     Map* mpMap;
-
+    Map* mpGroundMap;
     //Calibration matrix
     cv::Mat mK;
     cv::Mat mDistCoef;
+    float mImgWidth, mImgHeight;
     float mbf;
+    float mCameraSize;
 
     //New KeyFrame rules (according to fps)
     int mMinFrames;

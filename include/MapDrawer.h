@@ -43,11 +43,10 @@ public:
     void DrawCurrentCamera(pangolin::OpenGlMatrix &Twc);
     void SetCurrentCameraPose(const cv::Mat &Tcw);
     void SetReferenceKeyFrame(KeyFrame *pKF);
+    void SetCurrentPlaneParams(const cv::Mat &m);
     void GetCurrentOpenGLCameraMatrix(pangolin::OpenGlMatrix &M);
     void DrawGroundPlane(pangolin::OpenGlMatrix &Twc);
 
-   // double mPlaneParams;
-    cv::Mat mPlaneParams;
     float mCameraSize;
 private:
 
@@ -58,6 +57,7 @@ private:
     float mCameraLineWidth;
 
     cv::Mat mCameraPose;
+    cv::Mat mPlaneParams;
 
     std::mutex mMutexCamera;
 };

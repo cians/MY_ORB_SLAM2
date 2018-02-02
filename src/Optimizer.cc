@@ -313,45 +313,6 @@ int Optimizer::PoseOptimization(Frame *pFrame)
 
     for(int i=0; i<N; i++)
     {
-        cv::KeyPoint* pKP = &pFrame->mvKeys[i];
-        MapPoint* pMP = pFrame->mvpMapPoints[i];
-        if(pMP && pKP && !pMP->isBad())
-        {
-
-            cv::Point2f c11(200,700);
-            cv::Point2f c12(1620,700);
-            cv::Point2f c22(1846,1077);
-            cv::Point2f c21(1,1077);
-            // cv::Point2f c11(40,210);
-            // cv::Point2f c12(420,210);
-            // cv::Point2f c22(520,290);
-            // cv::Point2f c21(0,290);
-            if(pKP->pt.x > c21.x && pKP->pt.y > c11.y && pKP->pt.x < c22.x && pKP->pt.y < c22.y)
-            {
-                float xly = (c21.x-c11.x)/(c21.y-c11.y);//负数
-                float xry = (c22.x-c12.x)/(c22.y-c12.y);//x|y 是为了防止90°斜率不存在
-                float dxl = pKP->pt.x - c11.x;
-                float dyl = pKP->pt.y - c11.y;
-                float dxr = pKP->pt.x - c12.x;
-                float dyr = pKP->pt.y - c12.y;
-                if(dxl/dyl > xly && dxr/dyr < xry)
-                    {
-                        //进入这里的是地面候选map点。通过ransac得到的inliners才是真正的map points
-                        ransac_datas.push_back(pMP);
-                    }
-            }
-        }
-    }
-    double outPlaneD = 0;
-    Ransac ransacPlaned;
-    //printf("Data may be on ground :%lf \n", ransac_datas.size());
-    //redesigned the ransac,map points as input, and will change MapPoints' property: isGround 
-   // cout<< _vp<<endl;
-    ransacPlaned.RansacFitPlaneD(ransac_datas, ransac_datas.size(), _vp.segment(0,3), 0.1, outPlaneD);
-    printf("Ransac result plane d: %lf \n", outPlaneD);
-
-    for(int i=0; i<N; i++)
-    {
         MapPoint* pMP = pFrame->mvpMapPoints[i];
         if(pMP && !pMP->isBad())
         {

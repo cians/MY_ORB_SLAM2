@@ -150,20 +150,22 @@ void Ransac::RansacFitPlaneD(const vector<MapPoint*>& Data, const size_t num, Ei
     outParams = resultParamsD;
     //check threshold is very good
     //printf("--%lf-- ",PlaneABC(1));
-    for (size_t i = 0; i < Data.size(); ++i)
-    {
-        Eigen::Vector3d Data_ie = Converter::toVector3d(Data[i]->GetWorldPos());
-        double dist = Data_ie(0) * PlaneABC(0) +Data_ie(1) * PlaneABC(1) + Data_ie(2) * PlaneABC(2) + outParams; // fit 函数
-        if (abs(dist) < distanceThreshold)
-            {
-               // printf( GREEN " ==%7lf==" NONE,dist);
-                Data[i]->isGround = true;
-            }
-        // else if (abs(dist) > 2*distanceThreshold)
-        //     printf ( RED " ==%7lf==" NONE,dist);
-        // else
-        //     printf (NONE " ==%7lf==" NONE,dist);
-    }
+    // for (size_t i = 0; i < Data.size(); ++i)
+    // {
+    //     Eigen::Vector3d Data_ie = Converter::toVector3d(Data[i]->GetWorldPos());
+    //     double dist = Data_ie(0) * PlaneABC(0) +Data_ie(1) * PlaneABC(1) + Data_ie(2) * PlaneABC(2) + outParams; // fit 函数
+    //     if (abs(dist) < distanceThreshold)
+    //     {
+    //         // printf( GREEN " ==%7lf==" NONE,dist);
+    //         Data[i]->isGround = true;
+    //     }
+    //     else
+    //         Data[i]->isGround = false;
+    //     // else if (abs(dist) > 2*distanceThreshold)
+    //     //     printf ( RED " ==%7lf==" NONE,dist);
+    //     // else
+    //     //     printf (NONE " ==%7lf==" NONE,dist);
+    // }
 }
 
 void Ransac::Plane_fit(MapPoint* sampleMap, Eigen::Vector3d PlaneABC, double &result)
