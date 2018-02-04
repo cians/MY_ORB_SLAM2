@@ -38,8 +38,6 @@ MapDrawer::MapDrawer(Map* pMap, const string &strSettingPath):mpMap(pMap)
     mPointSize = fSettings["Viewer.PointSize"];
     mCameraSize = fSettings["Viewer.CameraSize"];
     mCameraLineWidth = fSettings["Viewer.CameraLineWidth"];
-    double M[4] ={0,0,0,1};
-    mPlaneParams = cv::Mat(4,1,CV_32F,M);
 
 }
 
@@ -272,9 +270,8 @@ void MapDrawer::DrawGroundPlane(pangolin::OpenGlMatrix &Twc)
     //
     //  pc0,pk0    0     pc1,pk0
 
-    if (!mPlaneParams.empty())
+    if (mPlaneParams.dims ==2 && mPlaneParams.cols == 1 && mPlaneParams.rows == 4 && mPlaneParams.type() == CV_32F) //check if it has been initialized
     {
-
         //mPlaneParams 转化到第一帧的坐标系。
         //使用两个点来跟踪平面方程参数M，N
         cv::Mat fMat = mPlaneParams.clone();
@@ -301,8 +298,6 @@ void MapDrawer::DrawGroundPlane(pangolin::OpenGlMatrix &Twc)
         float paraY1l = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc0) - fMat0.at<float>(2)*pk1) / fMat0.at<float>(1);
         float paraY1r = (-fMat0.at<float>(3) - fMat0.at<float>(0)*(pc1) - fMat0.at<float>(2)*pk1) / fMat0.at<float>(1);
         // //printf("the y :%f %f \n",paraY0l,paraY1r);
-       //  printf("draw plane paras: %lf  %lf  %lf  %lf\n",mPlaneParams.at<float>(0), mPlaneParams.at<float>(1), mPlaneParams.at<float>(2),mPlaneParams.at<float>(3));
-
         glColor4ub(0,255,255,105);
         glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
         glBegin(GL_TRIANGLES);

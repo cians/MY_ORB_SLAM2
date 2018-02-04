@@ -36,6 +36,9 @@
 
 namespace ORB_SLAM2
 {
+// !! 0.88 is set to const and used in 2 place : one is used in optimizing pose in optimizer.h,
+// another is used in Tracking.cc to initialize Frame's mPlaneParams in StereoInitialization()
+const double kGounrd2Camera = 0.88;
 class Ransac;
 class LoopClosing;
 //拟合平面需要的顶点和边
@@ -154,7 +157,7 @@ class BinaryEdgePose2MapPoint : public g2o::BaseBinaryEdge<1, Eigen::Vector3d,  
           const g2o::VertexSBAPointXYZ *pMapPoint = dynamic_cast<const  g2o::VertexSBAPointXYZ*>(vertex(1)); 
           Eigen::Vector3d center2MapP = center - pMapPoint->estimate();
           double cast_distance = center2MapP.dot(measurement().normalized());
-          _error(0) = abs(cast_distance) - 0.88;
+          _error(0) = abs(cast_distance) - kGounrd2Camera;
       }
 
 };
@@ -184,7 +187,7 @@ class UnaryEdgePose2MapPoint : public g2o::BaseUnaryEdge<1, Eigen::Matrix<double
           Eigen::Vector3d center2MapP = center - measurement().segment(0,3);
           Eigen::Vector3d vect = measurement().segment(3,3);
           double cast_distance = center2MapP.dot(vect.normalized());
-          _error(0) = abs(cast_distance) - 0.88;
+          _error(0) = abs(cast_distance) - kGounrd2Camera;
       }
 };
 //measurement ke当做权重
@@ -218,7 +221,7 @@ class EdgePose2Plane : public g2o::BaseBinaryEdge<1, double, VertexParam4Plane, 
           const double& d = params->estimate()(3);
           double res = a*center(0) + b*center(1) + c*center(2) + d;
           res = abs(res)/sqrt(a*a +b*b +c*c);
-          _error(0) = res - 0.88;
+          _error(0) = res - kGounrd2Camera;
       }
 
 };  
@@ -320,7 +323,6 @@ public:
                                        const unsigned long nLoopKF=0, const bool bRobust = true);
     void static LocalBundleAdjustment(KeyFrame* pKF, bool *pbStopFlag, Map *pMap);
     int static PoseOptimization(Frame* pFrame);
-    cv::Mat static GroundOpimization(Frame* pFrame,Tracking *mpTracker,cv::Mat OriParams);
 
     // if bFixScale is true, 6DoF optimization (stereo,rgbd), 7DoF otherwise (mono)
     void static OptimizeEssentialGraph(Map* pMap, KeyFrame* pLoopKF, KeyFrame* pCurKF,

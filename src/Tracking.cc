@@ -203,8 +203,7 @@ cv::Mat Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat &imRe
     }
 
     mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
-    float defaultPlane[4] = {0,1,0, -0.88};
-    mCurrentFrame.mPlaneParams = cv::Mat(4, 1, CV_32F, defaultPlane);
+    mCurrentFrame.mPlaneParams = mLastFrame.mPlaneParams;
     Track();
 
     return mCurrentFrame.mTcw.clone();
@@ -422,7 +421,7 @@ void Tracking::Track()
             mState=LOST;
 
         // Update drawer
-
+        // After tracking mCurrentFrame properties have updated
         //mPlaneParams 转化到第一帧的坐标系。
         //使用两个点来跟踪平面方程参数N,M
         //第一个N是在该平面上的，第二个点M在第一个点的“正上方”，这个方向是平面的法向量。
@@ -578,6 +577,9 @@ void Tracking::StereoInitialization()
     {
         // Set Frame pose to the origin
         mCurrentFrame.SetPose(cv::Mat::eye(4,4,CV_32F));
+        // !! 0.88 is set to const and used in 2 place : one is used in optimizing pose in optimizer.h,
+        // another is used in Tracking.cc to initialize Frame's mPlaneParams in StereoInitialization()
+        mCurrentFrame.mPlaneParams = (cv::Mat_<float>(4, 1, CV_32F) << 0, 1, 0, 0.88);
 
         // Create KeyFrame
         KeyFrame* pKFini = new KeyFrame(mCurrentFrame,mpMap,mpKeyFrameDB);
@@ -890,7 +892,7 @@ void Tracking::UpdateGroundMap()
             ransac_datas[i]->isGround = false;
     }
   // cout<<"mLastFrame planeparas: " <<_vp<<endl;
-    mCurrentFrame.mPlaneParams.at<float>(3) = outPlaneD;
+    mCurrentFrame.mPlaneParams.at<float>(3) = float(outPlaneD);
   //  cout<<"mCuurentF PlaneParas : "<<mCurrentFrame.mPlaneParams<<endl;
     printf("Ransac result plane d: %lf ,and MapPoints in GroundMap : %d \n", outPlaneD, int(mpGroundMap->MapPointsInMap()));
     
