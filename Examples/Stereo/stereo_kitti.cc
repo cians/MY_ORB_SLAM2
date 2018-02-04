@@ -51,6 +51,7 @@ int main(int argc, char **argv)
     LoadImages(string(argv[3]), vstrImageLeft, vstrImageRight, vTimestamps);
 
     const int nImages = vstrImageLeft.size();
+    assert(nImages == vstrImageRight.size());
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
     ORB_SLAM2::System SLAM(argv[1],argv[2],ORB_SLAM2::System::STEREO,true);

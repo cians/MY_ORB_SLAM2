@@ -831,8 +831,10 @@ void Tracking::UpdateGroundMap()
       // cout<<"GroundMap points nums:"<<vpgMP.size()<<endl;
        for (auto pgMP : vpgMP)
        {
+           // cout<<"ckeyFrame id: "<<mpReferenceKF->mnId << "pMP KFid : "<<pgMP->mnFirstKFid<<endl;
+           //cout<<pgMP->mbTrackInView<<" ";&& abs(int(pgMP->mnFirstKFid - mpReferenceKF->mnId)) < 3
            if (pgMP && !pgMP->isBad() && pgMP->isGround && pgMP->mnFirstFrame > 0 
-                                      && abs(int(pgMP->mnFirstFrame - mCurrentFrame.mnId)) < 5)
+                                     && pgMP->mbTrackInView && abs(int(pgMP->mnFirstKFid - mpReferenceKF->mnId)) < 9)// it should be associated with keyframe.
             {
                 ransac_datas.push_back(pgMP);                
             }
@@ -840,11 +842,11 @@ void Tracking::UpdateGroundMap()
                 mpGroundMap->EraseMapPoint(pgMP);
        } 
     }
-    printf("get %d mappoints in history. but CurrentFrame Mappoints: %d \n", int(ransac_datas.size()), mCurrentFrame.N);
-    for(int i=0; i<mCurrentFrame.N; i++)
+    printf("get %d mappoints in history. but CurrentFrame Mappoints: %d \n", int(ransac_datas.size()), mLastFrame.N);
+    for(int i=0; i<mLastFrame.N; i++)
     {
-        cv::KeyPoint* pKP = &mCurrentFrame.mvKeys[i];
-        MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
+        cv::KeyPoint* pKP = &mLastFrame.mvKeys[i];
+        MapPoint* pMP = mLastFrame.mvpMapPoints[i];
         if(pMP && pKP && !pMP->isBad())
         {
 
@@ -870,7 +872,7 @@ void Tracking::UpdateGroundMap()
     }
     double outPlaneD = 0;
     double distanceThreshold = 0.1;
-    Eigen::Vector4d _vp = Converter::toVector4d(mCurrentFrame.mPlaneParams);
+    Eigen::Vector4d _vp = Converter::toVector4d(mLastFrame.mPlaneParams);
     Ransac ransacPlaned;
     ransacPlaned.RansacFitPlaneD(ransac_datas, ransac_datas.size(), _vp.segment(0,3), distanceThreshold, outPlaneD);
     // set ransac inliners isGround and add it to GroundMap
@@ -887,6 +889,9 @@ void Tracking::UpdateGroundMap()
         else
             ransac_datas[i]->isGround = false;
     }
+  // cout<<"mLastFrame planeparas: " <<_vp<<endl;
+    mCurrentFrame.mPlaneParams.at<float>(3) = outPlaneD;
+  //  cout<<"mCuurentF PlaneParas : "<<mCurrentFrame.mPlaneParams<<endl;
     printf("Ransac result plane d: %lf ,and MapPoints in GroundMap : %d \n", outPlaneD, int(mpGroundMap->MapPointsInMap()));
     
 }

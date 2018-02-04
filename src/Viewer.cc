@@ -92,6 +92,8 @@ void Viewer::Run()
     bool bFollow = true;
     bool bLocalizationMode = false;
 
+   // usleep(1000);//wait for imRight
+
     while(1)
     {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
